@@ -10,6 +10,7 @@ namespace ECProject
       acceptor_(io_context_,
         asio::ip::tcp::endpoint(asio::ip::address::from_string(ip.c_str()), port_)) 
   {
+    easylog::set_min_severity(easylog::Severity::ERROR);
     rpc_coordinator_ = std::make_unique<coro_rpc::coro_rpc_client>();
     async_simple::coro::syncAwait(
         rpc_coordinator_->connect(coordinator_ip_, std::to_string(coordinator_port_)));
@@ -50,7 +51,7 @@ namespace ECProject
       asio::write(socket_, asio::buffer(key, key.size()));
       asio::write(socket_, asio::buffer(value, value.size()));
 
-      std::vector<unsigned char> finish_buf(sizeof(double));
+      std::vector<unsigned char> finish_buf(sizeof(int));
       asio::read(socket_, asio::buffer(finish_buf,
                                        finish_buf.size()));
       int finish = bytes_to_int(finish_buf);

@@ -7,7 +7,8 @@ namespace ECProject
         port_for_transfer_data_(port + SOCKET_PORT_OFFSET),
         acceptor_(io_context_, asio::ip::tcp::endpoint(asio::ip::address::from_string(ip.c_str()), port + SOCKET_PORT_OFFSET)) 
   {
-    // port is for rpc, port + 500 is for socket
+    easylog::set_min_severity(easylog::Severity::ERROR);
+    // port is for rpc, port + SOCKET_PORT_OFFSET is for socket
     rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(1, port_);
     rpc_server_->register_handler<&Proxy::checkalive>(this);
     rpc_server_->register_handler<&Proxy::encode_and_store_object>(this);
@@ -119,10 +120,11 @@ namespace ECProject
     }
   }
 
-  void Proxy::read_from_datanode(const char *key, size_t key_len,
+  bool Proxy::read_from_datanode(const char *key, size_t key_len,
                                  char *value, size_t value_len,
                                  const char *ip, int port)
   {
+    bool res = true;
     try
     {
       std::string node_ip_port = std::string(ip) + ":" + std::to_string(port);
@@ -158,10 +160,11 @@ namespace ECProject
           std::cout << "[Proxy" << self_cluster_id_ << "][GET]"
                     << "Read data from socket with length of "
                     << value_len << std::endl;
-          }
+        }
       } else {
         std::cout << "[Proxy" << self_cluster_id_ << "][GET]"
                   << "Get " << std::string(key) << " failed!" << std::endl;
+        res = false;
       }
       asio::error_code ignore_ec;
       socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
@@ -171,6 +174,7 @@ namespace ECProject
     {
       std::cerr << e.what() << '\n';
     }
+    return res;
   }
 
   void Proxy::delete_in_datanode(std::string block_id, const char *ip, int port)
@@ -426,14 +430,16 @@ namespace ECProject
     auto decode_and_transfer = [this, placement]() mutable {
       std::string object_value;
       auto ec = ec_factory(placement.ec_type, placement.cp);
+      ec->init_coding_parameters(placement.cp);
       int stripe_num = (int)placement.stripe_ids.size();
       size_t left_value_len = placement.value_len;
       for (auto i = 0; i < placement.stripe_ids.size(); i++) {
         unsigned int stripe_id = placement.stripe_ids[i];
         auto blocks_ptr = std::make_shared<std::unordered_map<int, std::string>>();
+        auto block_idxs_ptr = std::make_shared<std::unordered_map<int, int>>();
 
         size_t cur_block_size;
-        if ((i == placement.stripe_ids.size() - 1) && placement.tail_block_size != -1) {
+        if ((i == placement.stripe_ids.size() - 1) && placement.tail_block_size != 0) {
           cur_block_size = placement.tail_block_size;
         } else {
           cur_block_size = placement.block_size;
@@ -441,7 +447,7 @@ namespace ECProject
         my_assert(cur_block_size > 0);
 
         if (IF_DEBUG) {
-          std::cout << "[Proxy" << self_cluster_id_ << "] [SET]"
+          std::cout << "[Proxy" << self_cluster_id_ << "] [GET]"
                     << "Ready to read data from datanode. The block size is "
                     << cur_block_size << std::endl;
         }
@@ -462,23 +468,27 @@ namespace ECProject
         std::vector<std::thread> readers;
         for (int j = 0; j < num_of_datanodes_involved; j++) {
           unsigned int cluster_id =
-              placement.datanode_ip_port[i * num_of_blocks_each_stripe + j].first;
+              placement.datanode_ip_port[i * num_of_blocks_each_stripe + j + offset].first;
           std::pair<std::string, int> ip_and_port_of_datanode =
               placement.datanode_ip_port[i * num_of_blocks_each_stripe + j + offset].second;
           readers.push_back(
-            std::thread([this, i, j, stripe_id, blocks_ptr, cur_block_size,
+            std::thread([this, i, j, blocks_ptr, block_idxs_ptr, cur_block_size,
                 num_of_blocks_each_stripe, ip_and_port_of_datanode, placement, offset]() {
               std::string block_id =
                   std::to_string(placement.block_ids[i * num_of_blocks_each_stripe + j + offset]);
 
               std::string block(cur_block_size, 0);
-              read_from_datanode(block_id.c_str(), block_id.size(),
-                                 block.data(), cur_block_size,
-                                 ip_and_port_of_datanode.first.c_str(),
-                                 ip_and_port_of_datanode.second);
-
+              auto res = read_from_datanode(block_id.c_str(), block_id.size(),
+                                            block.data(), cur_block_size,
+                                            ip_and_port_of_datanode.first.c_str(),
+                                            ip_and_port_of_datanode.second);
+              if (!res) {
+                pthread_exit(NULL);
+                std::cout << "read failed" << std::endl;
+              }
               mutex_.lock();
               (*blocks_ptr)[j] = block;
+              (*block_idxs_ptr)[j] = i * num_of_blocks_each_stripe + j + offset;
               mutex_.unlock();
           }));
           if (cluster_id != self_cluster_id_) { // to do
@@ -489,11 +499,173 @@ namespace ECProject
           readers[j].join();
         }
 
-        my_assert(blocks_ptr->size() == num_of_datanodes_involved);
+        // for degraded read
+        if (blocks_ptr->size() < num_of_datanodes_involved) {
+          if (IF_DEBUG) {
+            std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                      << " encounter degraded read!" << std::endl;
+          }
+          auto retrieved_idx = std::vector<int>();
+          auto failures_idx = std::vector<int>();
+          for (int j = 0; j < num_of_datanodes_involved; j++) {
+            int idx = i * num_of_blocks_each_stripe + j + offset;
+            if (block_idxs_ptr->find(idx) == block_idxs_ptr->end()) {
+              failures_idx.push_back(idx);
+            } else {
+              retrieved_idx.push_back(idx);
+            }
+          }
 
-        for (int j = 0; j < placement.cp.k; j++) {
-          object_value += (*blocks_ptr)[j];
+          if (IF_DEBUG) {
+            std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                      << " unreachable blocks: ";
+            for (auto idx : failures_idx) {
+              std::cout << idx << " ";
+            }
+            std::cout << std::endl;
+          }
+
+          auto help_blocks_index = std::vector<int>();
+          // find out placement
+          ec->partition_plan.clear();
+          std::unordered_map<unsigned int, std::vector<int>> blocks_in_clusters;
+          for (int i = 0; i < ec->k + ec->m; i++) {
+            unsigned int cluster_id = placement.datanode_ip_port[i].first;
+            if (blocks_in_clusters.find(cluster_id) == blocks_in_clusters.end()) {
+              blocks_in_clusters[cluster_id] = std::vector<int>({i});
+            } else {
+              blocks_in_clusters[cluster_id].push_back(i);
+            }
+          }
+          for (auto &kv : blocks_in_clusters) {
+            ec->partition_plan.push_back(kv.second);
+          }
+          if (IF_DEBUG) {
+            ec->print_info(ec->partition_plan, "placement");
+          }
+
+          std::vector<RepairPlan> repair_plans;
+          ec->generate_repair_plan(failures_idx, repair_plans);
+          ec->local_or_column = false;
+          for (auto& plan : repair_plans) {
+            for (auto& help_block : plan.help_blocks) {
+              help_blocks_index.insert(help_blocks_index.end(),
+                help_block.begin(), help_block.end());
+            }
+          }
+
+          auto toretrieve_block_idxs = std::vector<int>();
+          for (auto idx : help_blocks_index) {
+            if (std::find(retrieved_idx.begin(), retrieved_idx.end(), idx)
+                == retrieved_idx.end()) {
+              toretrieve_block_idxs.push_back(idx);
+            }
+          }
+          int num_of_blocks_to_retrieve = toretrieve_block_idxs.size();
+          auto toretrieve_blocks_ptr = std::make_shared<std::unordered_map<int, std::string>>();
+          auto toretrieve_block_idxs_ptr = std::make_shared<std::unordered_map<int, int>>();
+          std::vector<std::thread> retrievers;
+          for (int j = 0; j < num_of_blocks_to_retrieve; j++) {
+            unsigned int cluster_id =
+                placement.datanode_ip_port[toretrieve_block_idxs[j]].first;
+            std::pair<std::string, int> ip_and_port_of_datanode =
+                placement.datanode_ip_port[toretrieve_block_idxs[j]].second;
+            retrievers.push_back (
+                std::thread([this, j, toretrieve_block_idxs, toretrieve_blocks_ptr,
+                toretrieve_block_idxs_ptr, cur_block_size, placement,
+                ip_and_port_of_datanode]() {
+                std::string block_id =
+                    std::to_string(placement.block_ids[toretrieve_block_idxs[j]]);
+
+                std::string block(cur_block_size, 0);
+                auto res = read_from_datanode(block_id.c_str(), block_id.size(),
+                                              block.data(), cur_block_size,
+                                              ip_and_port_of_datanode.first.c_str(),
+                                              ip_and_port_of_datanode.second);
+                if (!res) {
+                  pthread_exit(NULL);
+                }
+                mutex_.lock();
+                (*toretrieve_blocks_ptr)[j] = block;
+                (*toretrieve_block_idxs_ptr)[j] = toretrieve_block_idxs[j];
+                mutex_.unlock();
+            }));
+          }
+          for (auto j = 0; j < retrievers.size(); j++) {
+            retrievers[j].join();
+          }
+          my_assert(toretrieve_blocks_ptr->size() == num_of_blocks_to_retrieve);
+          if (IF_DEBUG) {
+            std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                      << " retrieve more blocks: ";
+            for (auto idx : toretrieve_block_idxs) {
+              std::cout << idx << " ";
+            }
+            std::cout << std::endl;
+          }
+
+          std::vector<char *> v_data(ec->k);
+          std::vector<char *> v_coding(ec->m);
+          char **data = (char **)v_data.data();
+          char **coding = (char **)v_coding.data();
+          std::vector<std::vector<char>>
+              v_data_area(ec->k, std::vector<char>(cur_block_size));
+          std::vector<std::vector<char>>
+              v_coding_area(ec->m, std::vector<char>(cur_block_size));
+          for (int j = 0; j < ec->k; j++) {
+            data[j] = v_data_area[j].data();
+          }
+          for (int j = 0; j < ec->m; j++) {
+            coding[j] = v_coding_area[j].data();
+          }
+
+          for (auto& kv : *blocks_ptr) {
+            int idx = (*block_idxs_ptr)[kv.first];
+            if (idx < ec->k) {
+              data[idx] = kv.second.data();
+            } else {
+              coding[idx - ec->k] = kv.second.data();
+            }
+          }
+          for (auto& kv : *toretrieve_blocks_ptr) {
+            int idx = (*toretrieve_block_idxs_ptr)[kv.first];
+            if (idx < ec->k) {
+              data[idx] = kv.second.data();
+            } else {
+              coding[idx - ec->k] = kv.second.data();
+            }
+          }
+
+          int failed_num = (int)failures_idx.size();
+          int erasures[failed_num + 1];
+          for (int j = 0; j < failed_num; j++) {
+            erasures[j] = failures_idx[j];
+          }
+          erasures[failed_num] = -1;
+
+          if (IF_DEBUG) {
+            std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                      << " ready to decode! " << ec->self_information() << std::endl;
+          }
+
+          ec->decode(data, coding, cur_block_size, erasures, failed_num);
+
+          if (IF_DEBUG) {
+            std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                      << " reconstruct unreachable blocks successfully!\n";
+          }
+
+          // for (int j = 0; j < num_of_datanodes_involved; j++) {
+          //   int idx = i * num_of_blocks_each_stripe + j + offset;
+          //   object_value += std::string(data[idx], cur_block_size);
+          //   std::cout << idx << " " << data[idx] << std::endl;
+          // }
+        } else {
+          for (int j = 0; j < num_of_datanodes_involved; j++) {
+            object_value += (*blocks_ptr)[j];
+          }
         }
+        
         if (IF_SIMULATE_CROSS_CLUSTER && IF_TEST_TRHROUGHPUT) {
           size_t t_val_len = (int)cur_block_size * cross_cluster_num;
           std::string t_value = generate_random_string((int)t_val_len);
@@ -514,6 +686,11 @@ namespace ECProject
 
       asio::write(socket_, asio::buffer(placement.key, placement.key.size()));
       asio::write(socket_, asio::buffer(object_value, object_value.size()));
+
+      if (IF_DEBUG) {
+        std::cout << "[Proxy" << self_cluster_id_ << "] [GET] "
+                  << " get successfully!\n";
+      }
 
       asio::error_code ignore_ec;
       socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
@@ -555,6 +732,10 @@ namespace ECProject
     {
       std::thread new_thread(delete_blocks_in_stripe);
       new_thread.join();
+      if (IF_DEBUG) {
+        std::cout << "[Proxy" << self_cluster_id_ << "] [DEL] "
+                  << " delete blocks successfully!" << std::endl;
+      }
     }
     catch(const std::exception& e)
     {

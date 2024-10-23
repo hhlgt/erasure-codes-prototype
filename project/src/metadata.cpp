@@ -20,6 +20,7 @@ namespace ECProject
 
   static const std::unordered_map<std::string, ECTYPE> ec_map = {
     {"RS", RS},
+    {"EnlargedRS", ERS},
     {"AZURE_LRC", AZURE_LRC},
     {"AZURE_LRC_1", AZURE_LRC_1},
     {"OPTIMAL_LRC", OPTIMAL_LRC},
@@ -138,17 +139,19 @@ namespace ECProject
     if (file.is_open()) {
       std::string line;
       while (std::getline(file, line)) {
-        if (line[0] == '[' ||line[0] == '#' || line.empty())
+        if (line[0] == '[' || line[0] == '#' || line.empty())
           continue;
 
         std::stringstream ss(line);
         std::string key, value;
         if (std::getline(ss, key, '=') && std::getline(ss, value)) {
           // remove space around '='
-          key.erase(key.begin(), std::find_if(key.begin(), key.end(),
-                    [](unsigned char ch) { return !std::isspace(ch); }));
-          value.erase(value.begin(), std::find_if(value.begin(), value.end(),
-                    [](unsigned char ch) { return !std::isspace(ch); }));
+          auto new_key_end = std::remove_if(key.begin(), key.end(),
+                  [](unsigned char ch) { return std::isspace(ch); });
+          key.erase(new_key_end, key.end());
+          auto new_val_end = std::remove_if(value.begin(), value.end(),
+              [](unsigned char ch) { return std::isspace(ch); });
+          value.erase(new_val_end, value.end());
           config[key] = value;
         }
       }
@@ -160,13 +163,28 @@ namespace ECProject
 
     paras.partial_decoding = (config["partial_decoding"] == "true");
     std::string temp = config["ec_type"];
-    paras.ec_type = ec_map.at(temp);
+    if (ec_map.find(temp) == ec_map.end()) {
+      std::cerr << "Unknown ec_type: " << temp << std::endl;
+      exit(0);
+    } else {
+      paras.ec_type = ec_map.at(temp);
+    }
     temp = config["placement_rule"];
-    paras.placement_rule = pr_map.at(temp);
+    if (pr_map.find(temp) == pr_map.end()) {
+      std::cerr << "Unknown placement_rule: " << temp << std::endl;
+      exit(0);
+    } else {
+      paras.placement_rule = pr_map.at(temp);
+    }
     temp = config["multistripe_placement_rule"];
-    paras.multistripe_placement_rule = mspr_map.at(temp);
+    if (mspr_map.find(temp) == mspr_map.end()) {
+      std::cerr << "Unknown multistripe_placement_rule: " << temp << std::endl;
+      exit(0);
+    } else {
+      paras.multistripe_placement_rule = mspr_map.at(temp);
+    }
     paras.object_size_upper = std::stoul(config["object_size_upper"]) * 1024;
-    paras.x = std::stoi(config["x"]);
+    paras.cp.x = std::stoi(config["x"]);
     paras.cp.k = std::stoi(config["k"]);
     paras.cp.m = std::stoi(config["m"]);
     paras.cp.l = std::stoi(config["l"]);
@@ -186,5 +204,21 @@ namespace ECProject
             + paras.cp.m1 * paras.cp.m2;
       }
     }
+
+    std::cout << "*-*-*-*-*-*-*-EC-Info-*-*-*-*-*-*-*" << std::endl;
+    std::cout << config["ec_type"] << " " << config["placement_rule"] << "(s) "
+              << config["multistripe_placement_rule"] << "(m)" << std::endl;
+    if (check_ec_family(paras.ec_type) == LRCs) {
+      std::cout << "(" << paras.cp.k << "," << paras.cp.l
+                << "," << paras.cp.g << ") ";
+    } else if (check_ec_family(paras.ec_type) == PCs) {
+      std::cout << "(" << paras.cp.k1 << "," << paras.cp.m1
+                << "," << paras.cp.k2 << "," << paras.cp.m2 << ") ";
+    } else {
+      std::cout << "(" << paras.cp.k << "," << paras.cp.m << ") ";
+    }
+    std::cout << paras.cp.x << "(x) "
+              << paras.object_size_upper / paras.cp.k << "(bytes)\n";
+    std::cout << "*-*-*-*-*-*-*-EC-Info-*-*-*-*-*-*-*" << std::endl;
   }
 }

@@ -7,10 +7,10 @@
 #include "ec/pc.h"
 
 #define LOG_TO_FILE true
-#define IF_SIMULATION true
-#define IF_SIMULATE_CROSS_CLUSTER true
+#define IF_SIMULATION false
+#define IF_SIMULATE_CROSS_CLUSTER false
 #define IF_TEST_TRHROUGHPUT false
-#define IF_DEBUG false
+#define IF_DEBUG true
 #define IF_DIRECT_FROM_NODE true    // proxy can directly access data from nodes in other clusters
 #define SOCKET_PORT_OFFSET 500
 #define STORAGE_SERVER_OFFSET 1000
@@ -49,8 +49,9 @@ namespace ECProject
     }
 
     void set_ec(ErasureCode *new_ec) {
-      if (ec!= nullptr) {
+      if (ec != nullptr) {
         delete ec;
+        ec = nullptr;
       }
       ec = new_ec;
     }
@@ -74,8 +75,9 @@ namespace ECProject
 
     ~Stripe()
     {
-      if (ec!= nullptr) {
+      if (ec != nullptr) {
         delete ec;
+        ec = nullptr;
       }
     }
   };
@@ -104,7 +106,6 @@ namespace ECProject
     PlacementRule placement_rule;
     MultiStripePR multistripe_placement_rule;
     CodingParameters cp;
-    int x;
     size_t object_size_upper;
   };
   

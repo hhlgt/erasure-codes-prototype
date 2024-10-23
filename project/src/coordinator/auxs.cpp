@@ -73,9 +73,12 @@ namespace ECProject
     time_ = 0;
     commited_object_table_.clear();
     updating_object_table_.clear();
+    merge_groups_.clear();
+    free_clusters_.clear();
     for (auto& kv : stripe_table_) {
       if (kv.second.ec != nullptr) {
         delete kv.second.ec;
+        kv.second.ec = nullptr;
       }
     }
     stripe_table_.clear();
@@ -88,9 +91,9 @@ namespace ECProject
   {
     Stripe temp;
     temp.stripe_id = cur_stripe_id_++;
-    temp.ec = clone_ec(ec_schema_.ec_type, ec_schema_.ec);
     temp.block_size = block_size;
     stripe_table_[temp.stripe_id] = temp;
+    stripe_table_[temp.stripe_id].ec = clone_ec(ec_schema_.ec_type, ec_schema_.ec);
     return stripe_table_[temp.stripe_id];
   }
 
@@ -118,9 +121,9 @@ namespace ECProject
   {
     Stripe temp;
     temp.stripe_id = cur_stripe_id_++;
-    temp.ec = clone_ec(ec_schema_.ec_type, ec);
     temp.block_size = block_size;
     stripe_table_[temp.stripe_id] = temp;
+    stripe_table_[temp.stripe_id].ec = clone_ec(ec_schema_.ec_type, ec);
     return stripe_table_[temp.stripe_id];
   }
 
@@ -144,7 +147,6 @@ namespace ECProject
   {
     Stripe& stripe = stripe_table_[stripe_id];
     stripe.ec->partition_plan.clear();
-
     std::unordered_map<unsigned int, std::vector<int>> blocks_in_clusters;
     for (int i = 0; i < stripe.ec->k + stripe.ec->m; i++) {
       unsigned int node_id = stripe.blocks2nodes[i];
@@ -155,11 +157,11 @@ namespace ECProject
         blocks_in_clusters[cluster_id].push_back(i);
       }
     }
-    for (auto &kv : blocks_in_clusters) {
+    for (auto& kv : blocks_in_clusters) {
       stripe.ec->partition_plan.push_back(kv.second);
     }
     if (IF_DEBUG) {
-      stripe.ec->print_info(stripe.ec->partition_plan, "placement");
+      stripe.ec->print_info(stripe.ec->partition_plan, "partition");
     }
   }
 
@@ -206,15 +208,5 @@ namespace ECProject
       return false;
     }
     return true;
-  }
-
-  void Coordinator::remove_stripe(unsigned int stripe_id)
-  {
-    if (stripe_table_.find(stripe_id)!= stripe_table_.end()) {
-      if (stripe_table_[stripe_id].ec!= nullptr) {
-        delete stripe_table_[stripe_id].ec;
-      }
-      stripe_table_.erase(stripe_id);
-    }
   }
 }

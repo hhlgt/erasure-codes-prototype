@@ -18,12 +18,34 @@ namespace ECProject
     for (auto& pair : failures_map) {
       gettimeofday(&start_time, NULL);
       gettimeofday(&m_start_time, NULL);
-      find_out_stripe_partitions(pair.first);
       Stripe& stripe = stripe_table_[pair.first];
+      stripe.ec->placement_rule = ec_schema_.placement_rule;
+      stripe.ec->generate_partition();
+      find_out_stripe_partitions(pair.first);
       std::vector<RepairPlan> repair_plans;
       bool flag = stripe.ec->generate_repair_plan(pair.second, repair_plans);
       if (!flag) {
         continue;
+      }
+      if (IF_DEBUG) {
+        for (int i = 0; i < int(repair_plans.size()); i++) {
+          RepairPlan& tmp = repair_plans[i];
+          std::cout << "> Failed Blocks: ";
+          for (int j = 0; 
+               j < int(tmp.failure_idxs.size()); j++) {
+            std::cout << tmp.failure_idxs[j] << " ";
+          }
+          std::cout << std::endl;
+          std::cout << "> Repair by Blocks: ";
+          for (auto& help_blocks : tmp.help_blocks) {
+            for(auto& block : help_blocks) {
+              std::cout << block << " ";
+            }
+          }
+          std::cout << std::endl;
+          std::cout << "> local_or_column: " << tmp.local_or_column << std::endl;
+          std::cout << std::endl;
+        }
       }
       std::vector<MainRepairPlan> main_repairs;
       std::vector<std::vector<HelpRepairPlan>> help_repairs;
@@ -40,7 +62,7 @@ namespace ECProject
       auto lock_ptr = std::make_shared<std::mutex>();
 
       auto send_main_repair_plan = 
-          [this, main_repairs, lock_ptr, decoding_time, cross_cluster_time](
+          [this, main_repairs, lock_ptr, &decoding_time, cross_cluster_time](
               int i, int main_cluster_id) mutable
       {
         std::string chosen_proxy = cluster_table_[main_cluster_id].proxy_ip +
@@ -72,27 +94,6 @@ namespace ECProject
       };
 
       // simulation
-      if (IF_DEBUG) {
-        for (int i = 0; i < int(main_repairs.size()); i++) {
-          MainRepairPlan& tmp = main_repairs[i];
-          std::cout << "> Failed Blocks: ";
-          for (int j = 0; 
-               j < int(tmp.failed_blocks_index.size()); j++) {
-            std::cout << tmp.failed_blocks_index[j] << " ";
-          }
-          std::cout << std::endl;
-          std::cout << "> Repair by Blocks: ";
-          for (int jj = 0; jj < int(tmp.inner_cluster_help_blocks_info.size()); jj++) {
-            std::cout << tmp.inner_cluster_help_blocks_info[jj].first << " ";
-          }
-          for (int j = 0; j < int(tmp.help_clusters_blocks_info.size()); j++) {
-            for(int jj = 0; jj < int(tmp.help_clusters_blocks_info[j].size()); jj++) {
-              std::cout << tmp.help_clusters_blocks_info[j][jj].first << " ";
-            }
-          }
-          std::cout << std::endl;
-        }
-      }
       simulation_repair(main_repairs, cross_cluster_transfers);
       if (IF_DEBUG) {
         std::cout << "Finish simulation! " << cross_cluster_transfers << std::endl;
@@ -256,6 +257,9 @@ namespace ECProject
       main_plan.cp.local_or_column = repair_plan.local_or_column;
       main_plan.block_size = stripe.block_size;
       main_plan.partial_decoding = ec_schema_.partial_decoding;
+      if ((int)main_plan.live_blocks_index.size() > stripe.ec->k) {
+        main_plan.partial_decoding = false;
+      }
       for(auto it = repair_plan.failure_idxs.begin();
           it != repair_plan.failure_idxs.end(); it++) {
         main_plan.failed_blocks_index.push_back(*it);
@@ -469,10 +473,10 @@ namespace ECProject
             int node_port = node_table_[node_id].node_port;
             pc.bid2rowcol(block_idx, row, col);
             if (repair_plan.local_or_column) {
-              main_plan.inner_cluster_help_blocks_info.push_back(
+              help_plan.inner_cluster_help_blocks_info.push_back(
                   std::make_pair(row, std::make_pair(node_ip, node_port)));
             } else {
-              main_plan.inner_cluster_help_blocks_info.push_back(
+              help_plan.inner_cluster_help_blocks_info.push_back(
                   std::make_pair(col, std::make_pair(node_ip, node_port)));
             }
             help_plan.inner_cluster_help_block_ids.push_back(

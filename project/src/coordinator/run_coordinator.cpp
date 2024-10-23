@@ -3,7 +3,7 @@
 using namespace ECProject;
 int main(int argc, char **argv)
 {
-  if (true) {
+  if (false) {
     umask(0);
     close(STDIN_FILENO);
     close(STDOUT_FILENO);

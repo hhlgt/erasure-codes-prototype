@@ -329,15 +329,15 @@ void test_rs_partition(RSCode *rs)
 {
   rs->placement_rule = FLAT;
   rs->generate_partition();
-  rs->print_info(rs->partition_plan, "placement");
+  rs->print_info(rs->partition_plan, "partition");
 
   rs->placement_rule = RANDOM;
   rs->generate_partition();
-  rs->print_info(rs->partition_plan, "placement");
+  rs->print_info(rs->partition_plan, "partition");
 
   rs->placement_rule = OPTIMAL;
   rs->generate_partition();
-  rs->print_info(rs->partition_plan, "placement");
+  rs->print_info(rs->partition_plan, "partition");
 }
 
 void test_rs_repair_plan(RSCode *rs, PlacementRule rule)
@@ -347,7 +347,7 @@ void test_rs_repair_plan(RSCode *rs, PlacementRule rule)
   
   rs->placement_rule = rule;
   rs->generate_partition();
-  rs->print_info(rs->partition_plan, "placement");
+  rs->print_info(rs->partition_plan, "partition");
 
   int failed_num = random_range(1, rs->m);
   std::vector<int> failure_idxs;

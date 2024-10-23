@@ -52,7 +52,7 @@ namespace ECProject
 
 	struct RepairPlan
 	{
-		bool local_or_column;
+		bool local_or_column = false;
 		std::vector<int> failure_idxs;
 		std::vector<std::vector<int>> help_blocks;
 	};

@@ -31,6 +31,9 @@ namespace ECProject
         repair_plan.failed_blocks_index);
     auto svrs_idx_ptr = std::make_shared<std::vector<int>>(
         repair_plan.live_blocks_index);
+    if ((int)svrs_idx_ptr->size() > ec->k) {
+      if_partial_decoding = false;
+    }
 
     auto original_lock_ptr = std::make_shared<std::mutex>();
     auto original_blocks_ptr = std::make_shared<std::vector<std::vector<char>>>();
@@ -43,8 +46,11 @@ namespace ECProject
     {
       std::string block_id_str = std::to_string(block_id);
       std::vector<char> tmp_val(block_size);
-      read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
+      bool res = read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
                          tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      if (!res) {
+        pthread_exit(NULL);
+      }
       original_lock_ptr->lock();
       original_blocks_ptr->push_back(tmp_val);
       original_blocks_idx_ptr->push_back(block_idx);
@@ -148,7 +154,8 @@ namespace ECProject
 
       if (IF_DEBUG) {
         std::cout << "[Main Proxy " << self_cluster_id_
-                  << "] Finish getting blocks inside main cluster." << std::endl;
+                  << "] Finish getting " << num_of_original_blocks
+                  << " blocks inside main cluster." << std::endl;
       }
     }
 
@@ -165,6 +172,7 @@ namespace ECProject
         if (num_of_blocks_in_cluster <= failed_num) {
           t_flag = false;
         }
+        std::cout << "t_flag: " << t_flag << " " << num_of_blocks_in_cluster << " " << failed_num << std::endl;
         t_flag = (if_partial_decoding && t_flag);
         if(!t_flag && IF_DIRECT_FROM_NODE) {  // transfer blocks directly
           num_of_original_blocks += num_of_blocks_in_cluster;
@@ -220,6 +228,9 @@ namespace ECProject
     cross_cluster_time += end_time.tv_sec - start_time.tv_sec +
         (end_time.tv_usec - start_time.tv_usec) * 1.0 / 1000000;
     
+    std::cout << "[Main Proxy " << self_cluster_id_ << "] Finish getting blocks from "
+              << num_of_help_clusters << " help clusters." << std::endl;
+    
     my_assert(num_of_original_blocks == (int)original_blocks_ptr->size());
     if (num_of_original_blocks > 0 && if_partial_decoding) {  // encode-and-transfer
       std::vector<char *> v_data(num_of_original_blocks);
@@ -234,14 +245,14 @@ namespace ECProject
       for (int j = 0; j < failed_num; j++) {
         coding[j] = v_coding_area[j].data();
       }
-            
+      
       gettimeofday(&start_time, NULL);
       ec->encode_partial_blocks_for_decoding(data, coding, block_size,
           *original_blocks_idx_ptr, *svrs_idx_ptr, *fls_idx_ptr);
       gettimeofday(&end_time, NULL);
       decoding_time += end_time.tv_sec - start_time.tv_sec +
           (end_time.tv_usec - start_time.tv_usec) * 1.0 / 1000000;
-            
+      
       partial_lock_ptr->lock();
       for (int j = 0; j < failed_num; j++) {
         partial_blocks_ptr->push_back(v_coding_area[j]);
@@ -482,6 +493,9 @@ namespace ECProject
         repair_plan.failed_blocks_index);
     auto svrs_idx_ptr = std::make_shared<std::vector<int>>(
         repair_plan.live_blocks_index);
+    if ((int)svrs_idx_ptr->size() > ec->k) {
+      if_partial_decoding = false;
+    }
 
     auto original_lock_ptr = std::make_shared<std::mutex>();
     auto original_blocks_ptr = std::make_shared<std::vector<std::vector<char>>>();
@@ -494,8 +508,11 @@ namespace ECProject
     {
       std::string block_id_str = std::to_string(block_id);
       std::vector<char> tmp_val(block_size);
-      read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
-          tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      bool res = read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
+              tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      if (!res) {
+        pthread_exit(NULL);
+      }
       original_lock_ptr->lock();
       original_blocks_ptr->push_back(tmp_val);
       original_blocks_idx_ptr->push_back(block_idx);

@@ -56,7 +56,6 @@ namespace ECProject
     bool if_subject_to_fault_tolerance_pc(
             unsigned int stripe_id, std::vector<int> blocks_in_cluster,
             std::unordered_map<int, std::vector<int>> &col_blocks);
-    void remove_stripe(unsigned int stripe_id);
 
     // placement.cpp
     // placement: partition -> place, a partition in a seperate region(cluster)
@@ -65,6 +64,7 @@ namespace ECProject
     void select_nodes_by_random(std::vector<unsigned int>& free_clusters,
                                 unsigned int stripe_id, int split_idx);
     void select_nodes_in_order(unsigned int stripe_id);
+    void print_placement_result(std::string msg);
 
     // repair
     void check_out_failures(
@@ -92,7 +92,6 @@ namespace ECProject
     void hpc_merge(MergeResp& response);
     void simulation_recalculation(MainRecalPlan& main_plan,
             int& cross_cluster_transfers);
-    void print_merge_result();
 
     std::unique_ptr<coro_rpc::coro_rpc_server> rpc_server_{nullptr};
     std::unordered_map<std::string, std::unique_ptr<coro_rpc::coro_rpc_client>> proxies_;

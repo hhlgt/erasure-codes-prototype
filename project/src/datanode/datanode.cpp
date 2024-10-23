@@ -8,6 +8,7 @@ namespace ECProject
                   asio::ip::tcp::endpoint(asio::ip::address::from_string(ip.c_str()), 
                   port + SOCKET_PORT_OFFSET))
   {
+    easylog::set_min_severity(easylog::Severity::ERROR);
     // port is for rpc 
     rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(1, port_);
     rpc_server_->register_handler<&Datanode::checkalive>(this);
@@ -36,6 +37,11 @@ namespace ECProject
         std::string url = "tcp://" + ip_ + ":" + std::to_string(port_ + STORAGE_SERVER_OFFSET);
         redis_ = std::make_unique<sw::redis::Redis>(url);
       #endif
+    #else
+      std::string targetdir = "./storage/";
+      if (access(targetdir.c_str(), 0) == -1) {
+        mkdir(targetdir.c_str(), S_IRWXU);
+      }
     #endif
   }
 
@@ -55,7 +61,7 @@ namespace ECProject
     return true;
   }
 
-  bool Datanode::storage(std::string& key_buf, std::string& value_buf, size_t value_size)
+  bool Datanode::store_data(std::string& key_buf, std::string& value_buf, size_t value_size)
   {
     #ifdef IN_MEMORY
       #ifdef MEMCACHED
@@ -73,7 +79,7 @@ namespace ECProject
       #endif
       #ifdef REDIS
         auto status = redis_->set(key_buf, value_buf);
-        if (status != "OK") {
+        if (!status) {
           std::cout << "[Datanode" << port_ << "][Redis] failed to set!\n";
           return false;
         }
@@ -94,10 +100,10 @@ namespace ECProject
         mkdir(targetdir.c_str(), S_IRWXU);
       }
       std::ofstream ofs(writepath, std::ios::binary | std::ios::out | std::ios::trunc);
-      auto ret = ofs.write(value_buf.data(), value_size);
+      ofs.write(value_buf.data(), value_size);
       ofs.flush();
       ofs.close();
-      if (ret < 0) {
+      if (!ofs) {
         std::cout << "[Datanode" << port_ << "][Disk] failed to set!\n";
         return false;
       }
@@ -105,7 +111,7 @@ namespace ECProject
     return true;
   }
 
-  bool Datanode::access(std::string& key_buf, std::string& value_buf, size_t value_size)
+  bool Datanode::access_data(std::string& key_buf, std::string& value_buf, size_t value_size)
   {
     #ifdef IN_MEMORY
       #ifdef MEMCACHED
@@ -126,7 +132,7 @@ namespace ECProject
           std::cout << "[Datanode" << port_ << "][Redis][Get] key not found!" << std::endl;
           return false;
         } else {
-          auto value_returned = redis_->get(key);
+          auto value_returned = redis_->get(key_buf);
           my_assert(value_returned.has_value());
           value_buf = value_returned.value();
         }
@@ -181,7 +187,7 @@ namespace ECProject
           asio::read(socket_, asio::buffer(key_buf.data(), key_buf.size()), ec);
           asio::read(socket_, asio::buffer(value_buf.data(), value_buf.size()), ec);
 
-          bool ret = storage(key_buf, value_buf, value_size);
+          bool ret = store_data(key_buf, value_buf, value_size);
 
           if (ret) {  // response
             std::vector<unsigned char> finish = int_to_bytes(1);
@@ -234,7 +240,7 @@ namespace ECProject
           asio::read(socket_, asio::buffer(key_buf.data(), key_buf.size()), ec);
           asio::read(socket_, asio::buffer(value_buf.data(), value_buf.size()), ec);
 
-          bool ret = storage(key_buf, value_buf, value_size);
+          bool ret = store_data(key_buf, value_buf, value_size);
 
           if (ret) {  // response
             std::vector<unsigned char> finish = int_to_bytes(1);
@@ -298,7 +304,7 @@ namespace ECProject
                   << std::endl;
       }
       std::string value_buf(value_len, 0);
-      bool ret = access(key, value_buf, value_len);
+      bool ret = access_data(key, value_buf, value_len);
 
       if (ret) {
         if (IF_DEBUG) {
@@ -349,10 +355,16 @@ namespace ECProject
     #ifdef IN_MEMORY
       #ifdef MEMCACHED
         memcached_return_t rc;
-        rc = memcached_delete(memcached_, block_key, block_key.size(), (time_t)0);
+        rc = memcached_delete(memcached_, block_key.data(), block_key.size(), (time_t)0);
         if (rc != MEMCACHED_SUCCESS) {
           std::cout << "[DEL] delete error! "
                     << memcached_strerror(memcached_, rc) << std::endl;
+        } else {
+          if (IF_DEBUG) {
+            std::cout << "[Datanode" << port_
+                      << "][memcached][Delete] successfully delete "
+                      << block_key << std::endl;
+          }
         }
       #endif
       #ifdef REDIS
@@ -360,15 +372,26 @@ namespace ECProject
           std::cout << "[DEL] key not found!" << std::endl;
         } else {
           redis_->del(block_key);
+          if (IF_DEBUG) {
+              std::cout << "[Datanode" << port_
+                        << "][redis][Delete] successfully delete "
+                        << block_key << std::endl;
+            }
         }
       #endif
       #ifndef MEMCACHED
-        #ifdef REDIS
-          auto it = kvstore_.find(key_buf);
+        #ifndef REDIS
+          auto it = kvstore_.find(block_key);
           if (it == kvstore_.end()) {
-            std::cout << "[Datanode" << port_ << "][kvstore][Get] key not found!" << std::endl;
+            std::cout << "[Datanode" << port_
+                      << "][kvstore][Get] key not found!" << std::endl;
           } else {
             kvstore_.erase(it);
+            if (IF_DEBUG) {
+              std::cout << "[Datanode" << port_
+                        << "][kvstore][Delete] successfully delete "
+                        << block_key << std::endl;
+            }
           }
         #endif
       #endif

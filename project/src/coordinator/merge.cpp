@@ -305,7 +305,7 @@ namespace ECProject
 
         auto lock_ptr = std::make_shared<std::mutex>();
         auto send_main_plan = [this, main_plan, parity_cluster_id,
-                               lock_ptr, computing_time,
+                               lock_ptr, &computing_time,
                                cross_cluster_time]() mutable
         {
           std::string chosen_proxy = cluster_table_[parity_cluster_id].proxy_ip +
@@ -393,7 +393,7 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
-          remove_stripe(*it);
+          stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
@@ -425,7 +425,7 @@ namespace ECProject
     response.cross_cluster_transfers = t_cross_cluster;
 
     if (IF_DEBUG) {
-      print_merge_result();
+      print_placement_result("After Merging:");
     }
   }
 
@@ -703,7 +703,7 @@ namespace ECProject
 
         auto lock_ptr = std::make_shared<std::mutex>();
         auto send_main_plan = [this, main_plan, global_cluster_id,
-                               lock_ptr, computing_time,
+                               lock_ptr, &computing_time,
                                cross_cluster_time]() mutable
         {
           std::string chosen_proxy = cluster_table_[global_cluster_id].proxy_ip +
@@ -793,7 +793,7 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
-          remove_stripe(*it);
+          stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
@@ -825,7 +825,7 @@ namespace ECProject
     response.cross_cluster_transfers = t_cross_cluster;
 
     if (IF_DEBUG) {
-      print_merge_result();
+      print_placement_result("After Merging:");
     }
   }
 
@@ -1290,7 +1290,7 @@ namespace ECProject
 
           auto lock_ptr = std::make_shared<std::mutex>();
           auto send_main_plan = [this, main_plan, parity_cluster_id,
-                                lock_ptr, computing_time,
+                                lock_ptr, &computing_time,
                                 cross_cluster_time]() mutable
           {
             std::string chosen_proxy = cluster_table_[parity_cluster_id].proxy_ip +
@@ -1386,7 +1386,7 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
-          remove_stripe(*it);
+          stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
@@ -1418,7 +1418,7 @@ namespace ECProject
     response.cross_cluster_transfers = t_cross_cluster;
 
     if (IF_DEBUG) {
-      print_merge_result();
+      print_placement_result("After Merging:");
     }
   }
 
@@ -1718,7 +1718,7 @@ namespace ECProject
 
           auto lock_ptr = std::make_shared<std::mutex>();
           auto send_main_plan = [this, main_plan, parity_cluster_id,
-                                lock_ptr, computing_time,
+                                lock_ptr, &computing_time,
                                 cross_cluster_time]() mutable
           {
             std::string chosen_proxy = cluster_table_[parity_cluster_id].proxy_ip +
@@ -1775,7 +1775,7 @@ namespace ECProject
         gettimeofday(&m_start_time, NULL);
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
-          remove_stripe(*it);
+          stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
@@ -1807,7 +1807,7 @@ namespace ECProject
     response.cross_cluster_transfers = t_cross_cluster;
 
     if (IF_DEBUG) {
-      print_merge_result();
+      print_placement_result("After Merging:");
     }
   }
 
@@ -1823,34 +1823,5 @@ namespace ECProject
         cross_cluster_transfers += help_block_num;
       }
     }
-  }
-
-  void Coordinator::print_merge_result()
-  {
-    std::cout << std::endl;
-    std::cout << "After Merging:" << std::endl;
-    for (auto kv : stripe_table_) {
-      find_out_stripe_partitions(kv.first);
-      std::cout << "Stripe " << kv.first << " block placement:\n";
-      for (auto& vec : kv.second.ec->partition_plan) {
-        unsigned int node_id = kv.second.blocks2nodes[vec[0]];
-        unsigned int cluster_id = node_table_[node_id].map2cluster;
-        std::cout << cluster_id << ": ";
-        for (int ele : vec) {
-          std::cout << "B" << ele << "N" << kv.second.blocks2nodes[ele] << " ";
-        }
-        std::cout << "\n";
-      }
-    }
-    std::cout << "Merge Group: ";
-    for (auto it1 = merge_groups_.begin(); it1 != merge_groups_.end(); it1++) {
-      std::cout << "[ ";
-      for (auto it2 = (*it1).begin(); it2 != (*it1).end(); it2++) {
-        std::cout << (*it2) << " ";
-      }
-      std::cout << "] ";
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
   }
 } // namespace ECProject

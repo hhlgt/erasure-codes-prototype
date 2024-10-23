@@ -5,6 +5,7 @@ namespace ECProject
   Coordinator::Coordinator(std::string ip, int port, std::string xml_path)
       : ip_(ip), port_(port), xml_path_(xml_path)
   {
+    easylog::set_min_severity(easylog::Severity::ERROR);
     rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(4, port_);
     rpc_server_->register_handler<&Coordinator::checkalive>(this);
     rpc_server_->register_handler<&Coordinator::set_erasure_coding_parameters>(this);
@@ -13,13 +14,18 @@ namespace ECProject
     rpc_server_->register_handler<&Coordinator::request_get>(this);
     rpc_server_->register_handler<&Coordinator::request_delete_by_stripe>(this);
     rpc_server_->register_handler<&Coordinator::request_repair>(this);
+    rpc_server_->register_handler<&Coordinator::request_merge>(this);
+    rpc_server_->register_handler<&Coordinator::list_stripes>(this);
 
     cur_stripe_id_ = 0;
     cur_block_id_ = 0;
     time_ = 0;
-        
-    init_proxy_info();
+    
     init_cluster_info();
+    init_proxy_info();
+    if (IF_DEBUG) {
+      std::cout << "Start the coordinator! " << ip << ":" << port << std::endl;
+    }
   }
   Coordinator::~Coordinator() { rpc_server_->stop(); }
 
@@ -36,7 +42,7 @@ namespace ECProject
     ec_schema_.ec_type = paras.ec_type;
     ec_schema_.placement_rule = paras.placement_rule;
     ec_schema_.multistripe_placement_rule = paras.multistripe_placement_rule;
-    ec_schema_.x = paras.x;
+    ec_schema_.x = paras.cp.x;
     ec_schema_.object_size_upper = paras.object_size_upper;
     ec_schema_.ec = ec_factory(paras.ec_type, paras.cp);
     reset_metadata();
@@ -337,6 +343,14 @@ namespace ECProject
       int selected_proxy_id = random_index(cluster_table_.size());
       std::string location = cluster_table_[selected_proxy_id].proxy_ip +
           std::to_string(cluster_table_[selected_proxy_id].proxy_port);
+      if (IF_DEBUG) {
+        std::cout << "[GET] Select proxy "
+                  << cluster_table_[selected_proxy_id].proxy_ip << ":" 
+                  << cluster_table_[selected_proxy_id].proxy_port
+                  << " in cluster "
+                  << cluster_table_[selected_proxy_id].cluster_id
+                  << " to handle get!" << std::endl;
+      }
       async_simple::coro::syncAwait(
           proxies_[location]->call<&Proxy::decode_and_get_object>(placement));
     }
@@ -348,6 +362,9 @@ namespace ECProject
   {
     std::unordered_set<std::string> objects_key;
     int num_of_stripes = (int)stripe_ids.size();
+    if (IF_DEBUG) {
+        std::cout << "[DELETE] Delete " << num_of_stripes << " stripes!\n";
+    }
     DeletePlan delete_info;
     for (int i = 0; i < num_of_stripes; i++) {
       auto &stripe = stripe_table_[stripe_ids[i]];
@@ -384,6 +401,9 @@ namespace ECProject
       commited_object_table_.erase(key);
     }
     mutex_.unlock();
+    if (IF_DEBUG) {
+      std::cout << "[DELETE] Finish delete!" << std::endl;
+    }
   }
 
   std::vector<unsigned int> Coordinator::list_stripes()

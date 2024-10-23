@@ -189,14 +189,23 @@ void RSCode::help_blocks_for_multi_blocks_repair_oneoff(
     return;
   }
 
+	std::vector<std::vector<int>> copy_partition;
+	for (int i = 0; i < parition_num; i++) {
+		std::vector<int> partition;
+		for (auto idx : partition_plan[i]) {
+			partition.push_back(idx);
+		}
+		copy_partition.push_back(partition);
+	}
+
 	int failures_cnt[parition_num] = {0};
 	for (auto failure_idx : failure_idxs) {
 		for (int i = 0; i < parition_num; i++) {
-			auto it = std::find(partition_plan[i].begin(), partition_plan[i].end(),
+			auto it = std::find(copy_partition[i].begin(), copy_partition[i].end(),
 													failure_idx);
-			if (it != partition_plan[i].end()) {
+			if (it != copy_partition[i].end()) {
 				failures_cnt[i]++;
-				partition_plan[i].erase(it);	// remove the failures
+				copy_partition[i].erase(it);	// remove the failures
 				break;
 			}			
 		}
@@ -204,7 +213,7 @@ void RSCode::help_blocks_for_multi_blocks_repair_oneoff(
 	std::vector<std::pair<int, int>> main_partition_idx_to_num;
 	std::vector<std::pair<int, int>> partition_idx_to_num;
 	for (int i = 0; i < parition_num; i++) {
-		int partition_size = (int)partition_plan[i].size();
+		int partition_size = (int)copy_partition[i].size();
 		if (failures_cnt[i]) {
 			main_partition_idx_to_num.push_back(std::make_pair(i, partition_size));
 		} else {
@@ -217,9 +226,9 @@ void RSCode::help_blocks_for_multi_blocks_repair_oneoff(
 						cmp_descending);
 
 	int cnt = 0;
-	for (auto pair : main_partition_idx_to_num) {
+	for (auto& pair : main_partition_idx_to_num) {
 		std::vector<int> main_help_block;
-		for (auto idx : partition_plan[pair.first]) {
+		for (auto idx : copy_partition[pair.first]) {
 			if (cnt < k) {
 				main_help_block.push_back(idx);
 				cnt++;
@@ -236,7 +245,7 @@ void RSCode::help_blocks_for_multi_blocks_repair_oneoff(
 	}
 	for (auto& pair : partition_idx_to_num) {
 		std::vector<int> help_block;
-		for (auto idx : partition_plan[pair.first]) {
+		for (auto idx : copy_partition[pair.first]) {
 			if (cnt < k) {
 				help_block.push_back(idx);
 				cnt++;

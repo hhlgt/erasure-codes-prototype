@@ -37,7 +37,7 @@ namespace ECProject
   private:
     void init_datanodes();
     void write_to_datanode(const char *key, size_t key_len, const char *value, size_t value_len, const char *ip, int port);
-    void read_from_datanode(const char *key, size_t key_len, char *value, size_t value_len, const char *ip, int port);
+    bool read_from_datanode(const char *key, size_t key_len, char *value, size_t value_len, const char *ip, int port);
     void delete_in_datanode(std::string block_id, const char *ip, int port);
     void block_migration(const char *key, size_t key_len, size_t value_len, const char *src_ip, int src_port, const char *dsn_ip, int dsn_port);
     void transfer_to_networkcore(const char *value, size_t value_len);

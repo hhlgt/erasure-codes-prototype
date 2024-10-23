@@ -524,7 +524,6 @@ bool ProductCode::generate_repair_plan(std::vector<int> failure_idxs,
 				int par_num = (int)plan.help_blocks.size();
 				for (int ii = 0; ii < par_num; ii++) {
 					for (auto it = plan.help_blocks[ii].begin(); it != plan.help_blocks[ii].end(); it++) {
-						std::cout << i << " " << *it << std::endl;
 						*it = rowcol2bid(i, *it);
 					}
 				}

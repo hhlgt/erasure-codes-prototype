@@ -181,38 +181,35 @@ void LocallyRepairableCode::encode_partial_blocks_for_decoding_local(
       min_idx = idx;
   }
 
-  // change into the index for encoding a local parity block
-  std::vector<int> survivor_idxs_;
-  std::vector<int> local_survivor_idxs_;
-  std::vector<int> failure_idxs_;
-  for (auto it = survivor_idxs.begin(); it != survivor_idxs.end(); it++) {
-    int idx = *it;
+  for (size_t i = 0; i < survivor_idxs.size(); ++i) {
+    int idx = survivor_idxs[i];
     if (idx >= k + g)
-      survivor_idxs_.push_back(group_size);
+        survivor_idxs[i] = group_size;
     else
-      survivor_idxs_.push_back(idx - min_idx);
+        survivor_idxs[i] = idx - min_idx;
   }
-  for (auto it = failure_idxs.begin(); it != failure_idxs.end(); it++){
-    int idx = *it;
+  for (size_t i = 0; i < failure_idxs.size(); ++i) {
+    int idx = failure_idxs[i];
     if (idx >= k + g)
-      failure_idxs_.push_back(group_size);
+        failure_idxs[i] = group_size;
     else
-      failure_idxs_.push_back(idx - min_idx);
+        failure_idxs[i] = idx - min_idx;
   }
-  for (auto it = local_survivor_idxs.begin(); it != local_survivor_idxs.end(); it++) {
-    int idx = *it;
+  for (size_t i = 0; i < local_survivor_idxs.size(); ++i) {
+    int idx = local_survivor_idxs[i];
     if (idx >= k + g)
-      local_survivor_idxs_.push_back(group_size);
+        local_survivor_idxs[i] = group_size;
     else
-      local_survivor_idxs_.push_back(idx - min_idx);
+        local_survivor_idxs[i] = idx - min_idx;
   }
+  
   std::vector<int> group_matrix((group_size + 1) * group_size, 0);
   get_full_matrix(group_matrix.data(), group_size);
   make_group_matrix(&(group_matrix.data())[group_size * group_size], group_id);
   encode_partial_blocks_for_decoding_(group_size, group_matrix.data(),
                                       data_ptrs, coding_ptrs, block_size,
-                                      local_survivor_idxs_, survivor_idxs_,
-                                      failure_idxs_);
+                                      local_survivor_idxs, survivor_idxs,
+                                      failure_idxs);
 }
 
 void LocallyRepairableCode::partition_random()
@@ -275,6 +272,7 @@ void LocallyRepairableCode::help_blocks_for_single_block_repair_oneoff(
         if (bid == failure_idx) {
           main_par_idx = i;
           cnt = 0;
+          break;
         }
       }
       if (cnt > 0) {
@@ -305,11 +303,13 @@ void LocallyRepairableCode::help_blocks_for_single_block_repair_oneoff(
     for (auto& pair : partition_idx_to_num) {
       std::vector<int> help_block;
       for (auto idx : partition_plan[pair.first]) {
-        if (cnt < k && idx < k + g) {
-          help_block.push_back(idx);
-          cnt++;
-        } else {
-          break;
+        if (idx < k + g) {
+          if (cnt < k) {
+            help_block.push_back(idx);
+            cnt++;
+          } else {
+            break;
+          }
         }
       }
       if (cnt > 0 && cnt <= k) {
@@ -342,40 +342,49 @@ void LocallyRepairableCode::help_blocks_for_multi_blocks_repair_oneoff(
     return;
   }
 
+  std::vector<std::vector<int>> copy_partition;
+	for (int i = 0; i < parition_num; i++) {
+		std::vector<int> partition;
+		for (auto idx : partition_plan[i]) {
+			partition.push_back(idx);
+		}
+		copy_partition.push_back(partition);
+	}
+
   if (flag) {
     for (auto failure_idx : failure_idxs) {
       for (int i = 0; i < parition_num; i++) {
-        auto it = std::find(partition_plan[i].begin(), partition_plan[i].end(),
+        auto it = std::find(copy_partition[i].begin(), copy_partition[i].end(),
                             failure_idx);
-        if (it != partition_plan[i].end()) {
-          partition_plan[i].erase(it);	// remove the failures
+        if (it != copy_partition[i].end()) {
+          copy_partition[i].erase(it);	// remove the failures
           break;
         }			
       }
     }
     for (int i = 0; i < parition_num; i++) {
-      if (partition_plan[i].size() > 0) {
-        help_blocks.push_back(partition_plan[i]);
+      if (copy_partition[i].size() > 0) {
+        help_blocks.push_back(copy_partition[i]);
       }
     }
   } else {  // for repair with only data and global parity blocks
     int failures_cnt[parition_num] = {0};
     for (auto failure_idx : failure_idxs) {
       for (int i = 0; i < parition_num; i++) {
-        auto it = std::find(partition_plan[i].begin(), partition_plan[i].end(),
+        auto it = std::find(copy_partition[i].begin(), copy_partition[i].end(),
                             failure_idx);
-        if (it != partition_plan[i].end()) {
+        if (it != copy_partition[i].end()) {
           failures_cnt[i]++;
-          partition_plan[i].erase(it);	// remove the failures
+          copy_partition[i].erase(it);	// remove the failures
           break;
         }			
       }
     }
     for (int l_ = k + g; l_ < k + g + l; l_++) {
       for (int i = 0; i < parition_num; i++) {
-        auto it = std::find(partition_plan[i].begin(), partition_plan[i].end(), l_);
-        if (it != partition_plan[i].end()) {
-          partition_plan[i].erase(it);	// remove local parity blocks
+        auto it = std::find(copy_partition[i].begin(), copy_partition[i].end(), l_);
+        if (it != copy_partition[i].end()) {
+          copy_partition[i].erase(it);	// remove local parity blocks
           break;
         }	
       }
@@ -383,7 +392,7 @@ void LocallyRepairableCode::help_blocks_for_multi_blocks_repair_oneoff(
     std::vector<std::pair<int, int>> main_partition_idx_to_num;
     std::vector<std::pair<int, int>> partition_idx_to_num;
     for (int i = 0; i < parition_num; i++) {
-      int partition_size = (int)partition_plan[i].size();
+      int partition_size = (int)copy_partition[i].size();
       if (failures_cnt[i]) {
         main_partition_idx_to_num.push_back(std::make_pair(i, partition_size));
       } else {
@@ -398,7 +407,7 @@ void LocallyRepairableCode::help_blocks_for_multi_blocks_repair_oneoff(
     int cnt = 0;
     for (auto pair : main_partition_idx_to_num) {
       std::vector<int> main_help_block;
-      for (auto idx : partition_plan[pair.first]) {
+      for (auto idx : copy_partition[pair.first]) {
         if (cnt < k) {
           main_help_block.push_back(idx);
           cnt++;
@@ -415,7 +424,7 @@ void LocallyRepairableCode::help_blocks_for_multi_blocks_repair_oneoff(
     }
     for (auto& pair : partition_idx_to_num) {
       std::vector<int> help_block;
-      for (auto idx : partition_plan[pair.first]) {
+      for (auto idx : copy_partition[pair.first]) {
         if (cnt < k) {
           help_block.push_back(idx);
           cnt++;
@@ -436,6 +445,10 @@ void LocallyRepairableCode::help_blocks_for_multi_blocks_repair_oneoff(
 bool LocallyRepairableCode::generate_repair_plan(std::vector<int> failure_idxs,
 																	               std::vector<RepairPlan>& plans)
 {
+  bool decodable = check_if_decodable(failure_idxs);
+  if (!decodable) {
+    return false;
+  }
 	int failed_num = (int)failure_idxs.size();
 	if (failed_num == 1) {
     RepairPlan plan;
@@ -445,8 +458,10 @@ bool LocallyRepairableCode::generate_repair_plan(std::vector<int> failure_idxs,
     int group_id = bid2gid(failure_idxs[0]);
     if (group_id < l) {
       local_or_column = true;
+      plan.local_or_column = true;
     } else {
       local_or_column = false;
+      plan.local_or_column = false;
     }
 		help_blocks_for_single_block_repair_oneoff(failure_idxs[0], plan.help_blocks);
     plans.push_back(plan);
@@ -632,10 +647,9 @@ void Azu_LRC::make_group_matrix(int *group_matrix, int group_id)
 {
   for (int i = 0; i < l; i++) {
     if (i == group_id) {
-      for (int j = 0; j < k; j++) {
-        if (i * r <= j && j < (i + 1) * r) {
-          group_matrix[j] = 1;
-        }
+      int group_size = std::min(r, k - i * r);
+      for(int j = 0; j < group_size; j++) {
+        group_matrix[j] = 1;
       }
     }
   }
@@ -1824,12 +1838,15 @@ void Opt_Cau_LRC::help_blocks_for_single_block_repair_oneoff(
     for (auto& pair : partition_idx_to_num) {
       std::vector<int> help_block;
       for (auto idx : partition_plan[pair.first]) {
-        if (cnt < k && idx < k + g) {
-          help_block.push_back(idx);
-          cnt++;
-        } else {
-          break;
+        if (idx < k + g) {
+          if (cnt < k) {
+            help_block.push_back(idx);
+            cnt++;
+          } else {
+            break;
+          }
         }
+        
       }
       if (cnt > 0 && cnt <= k) {
         help_blocks.push_back(help_block);
@@ -1844,6 +1861,10 @@ void Opt_Cau_LRC::help_blocks_for_single_block_repair_oneoff(
 bool Opt_Cau_LRC::generate_repair_plan(std::vector<int> failure_idxs,
 																	     std::vector<RepairPlan>& plans)
 {
+  bool decodable = check_if_decodable(failure_idxs);
+  if (!decodable) {
+    return false;
+  }
 	int failed_num = (int)failure_idxs.size();
 	if (failed_num == 1) {
     RepairPlan plan;
@@ -1851,6 +1872,7 @@ bool Opt_Cau_LRC::generate_repair_plan(std::vector<int> failure_idxs,
       plan.failure_idxs.push_back(idx);
     }
     local_or_column = true;
+    plan.local_or_column = true;
 		help_blocks_for_single_block_repair_oneoff(failure_idxs[0], plan.help_blocks);
     plans.push_back(plan);
 	} else {

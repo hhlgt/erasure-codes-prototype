@@ -171,7 +171,7 @@ void ErasureCode::generate_partition()
 
 void ErasureCode::print_info(std::vector<std::vector<int>> info, std::string info_str)
 {
-	if (info_str == "placement") {
+	if (info_str == "partition") {
 		std::string placement_type = "_flat";
 		if (placement_rule == RANDOM) {
 			placement_type = "_random";

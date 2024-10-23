@@ -2,6 +2,7 @@
 
 const std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
+// generate random index in range [0, len - 1]
 int ECProject::random_index(size_t len)
 {
   std::random_device rd;
@@ -10,6 +11,7 @@ int ECProject::random_index(size_t len)
   return dist(gen);
 }
 
+// generate random numbers in range [min, max]
 int ECProject::random_range(int min, int max)
 {
   std::random_device rd;
@@ -18,6 +20,7 @@ int ECProject::random_range(int min, int max)
   return dist(gen);
 }
 
+// generate n random numbers in range [min, max]
 void ECProject::random_n_num(int min, int max, int n, std::vector<int> &random_numbers)
 {
   my_assert(n <= max - min + 1);

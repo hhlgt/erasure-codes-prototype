@@ -2,8 +2,8 @@ import os
 
 current_path = os.getcwd()
 parent_path = os.path.dirname(current_path)
-cluster_number = 20
-datanode_number_per_cluster = 20
+cluster_number = 10
+datanode_number_per_cluster = 12
 datanode_port_start = 17600
 cluster_id_start = 0
 iftest = True
@@ -147,10 +147,12 @@ def generater_cluster_information_xml():
     tree.write(file_name, encoding="utf-8", xml_declaration=True)
 
 def cluster_generate_run_redis_datanode_file(i, bias=1000):
-    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_redis_datanode.sh'
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 redis-server\n")
-        f.write("pkill -9 run_proxy\n")
+        f.write("pkill -9 run_datanode\n")
         f.write("sudo sysctl vm.overcommit_memory=1\n")
         f.write("\n")
         for j in range(i * vc_per_pc, (i + 1) * vc_per_pc):
@@ -163,10 +165,12 @@ def cluster_generate_run_redis_datanode_file(i, bias=1000):
             f.write("\n") 
 
 def cluster_generate_run_memcached_datanode_file(i, bias=1000):
-    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_memcached_datanode.sh'
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 memcached\n")
-        f.write("pkill -9 run_proxy\n")
+        f.write("pkill -9 run_datanode\n")
         f.write("\n")
         for j in range(i * vc_per_pc, (i + 1) * vc_per_pc):
             for each_datanode in cluster_informtion[j]["datanode"]:
@@ -177,7 +181,21 @@ def cluster_generate_run_memcached_datanode_file(i, bias=1000):
                 f.write("./project/build/run_datanode "+"0.0.0.0"+" "+str(each_datanode[1])+"\n")
             f.write("\n") 
 
+def cluster_generate_run_datanode_file(i, bias=1000):
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
+    with open(file_name, 'w') as f:
+        f.write("pkill -9 run_datanode\n")
+        f.write("\n")
+        for j in range(i * vc_per_pc, (i + 1) * vc_per_pc):
+            for each_datanode in cluster_informtion[j]["datanode"]:
+                f.write("./project/build/run_datanode "+"0.0.0.0"+" "+str(each_datanode[1])+"\n")
+            f.write("\n") 
+
 def cluster_generate_run_proxy_file(i):
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
     file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_proxy.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 run_proxy\n")
@@ -190,6 +208,8 @@ def cluster_generate_run_proxy_file(i):
             port += 7
 
 def cluster_generate_run_proxy_datanode_file(i):
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
     file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_proxy_datanode.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 run_datanode\n")
@@ -206,6 +226,8 @@ def cluster_generate_run_proxy_datanode_file(i):
             port += 7
 
 def cluster_generate_run_redis_file(i, bias=1000):
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
     file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_server.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 redis-server\n")
@@ -217,6 +239,8 @@ def cluster_generate_run_redis_file(i, bias=1000):
             f.write("\n")
 
 def cluster_generate_run_memcached_file(i, bias=1000):
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
     file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_server.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 memcached\n")
@@ -228,7 +252,9 @@ def cluster_generate_run_memcached_file(i, bias=1000):
             f.write("\n")
 
 def cluster_generate_sh_for_networkcore_redis(i, bias=1000):
-    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_server.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 run_datanode\n")
         f.write("pkill -9 redis-server\n")
@@ -240,7 +266,9 @@ def cluster_generate_sh_for_networkcore_redis(i, bias=1000):
         f.write("\n")
         
 def cluster_generate_sh_for_networkcore_memcached(i, bias=1000):
-    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_server.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 run_datanode\n")
         f.write("pkill -9 memcached\n")
@@ -251,7 +279,9 @@ def cluster_generate_sh_for_networkcore_memcached(i, bias=1000):
         f.write("\n")
 
 def cluster_generate_sh_for_networkcore(i):
-    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_datanode.sh'
+    if not os.path.exists(parent_path + '/run_cluster_sh/' + str(i)):
+        os.makedirs(parent_path + '/run_cluster_sh/' + str(i))
+    file_name = parent_path + '/run_cluster_sh/' + str(i) +'/cluster_run_server.sh'
     with open(file_name, 'w') as f:
         f.write("pkill -9 run_datanode\n")
         f.write("\n")
@@ -268,9 +298,11 @@ if __name__ == "__main__":
         elif ifmemcached:
             generate_run_memcached_file()
     else:
+        if not os.path.exists(parent_path + '/run_cluster_sh'):
+            os.makedirs(parent_path + '/run_cluster_sh')
         cnt = 0
         for i in range(cluster_number / vc_per_pc):
-            cluster_generate_run_proxy_datanode_file(i)
+            cluster_generate_run_proxy_file(i)
             if ifredis:
                 cluster_generate_run_redis_datanode_file(i)
             elif ifmemcached:

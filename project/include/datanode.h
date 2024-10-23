@@ -13,6 +13,8 @@
   #ifdef REDIS
     #include <sw/redis++/redis++.h>
   #endif
+#else
+  #include <unistd.h>
 #endif
 
 
@@ -37,8 +39,8 @@ namespace ECProject
     void handle_transfer();
 
   private:
-    bool storage(std::string& key, std::string& value, size_t value_size);
-    bool access(std::string& key, std::string& value, size_t value_size);
+    bool store_data(std::string& key, std::string& value, size_t value_size);
+    bool access_data(std::string& key, std::string& value, size_t value_size);
     std::unique_ptr<coro_rpc::coro_rpc_server> rpc_server_{nullptr};
     std::string ip_;
     int port_;
@@ -47,7 +49,7 @@ namespace ECProject
     asio::ip::tcp::acceptor acceptor_;
     #ifdef IN_MEMORY
       #ifdef MEMCACHED
-        std::unique_ptr<memcached_st> memcached_{nullptr};
+        memcached_st *memcached_;
       #endif
       #ifdef REDIS
         std::unique_ptr<sw::redis::Redis> redis_{nullptr};

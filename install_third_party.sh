@@ -3,7 +3,7 @@ set -e
 
 IF_JERASURE=0
 IF_YALANTING=0
-IF_MEMCACHED=1
+IF_MEMCACHED=0
 IF_REDIS=0
 
 SOCKET_RPC_INSTALL_DIR=$CRT_DIR"/project/third_party/yalantinglibs"

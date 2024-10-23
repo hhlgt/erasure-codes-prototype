@@ -9,10 +9,9 @@ namespace ECProject
     for (int i = 0; i < n; i++) {
       stripe.block_ids.push_back(cur_block_id_++);
     }
-
     stripe.ec->placement_rule = ec_schema_.placement_rule;
     stripe.ec->generate_partition();
-    stripe.ec->print_info(stripe.ec->partition_plan, "placement");
+    stripe.ec->print_info(stripe.ec->partition_plan, "partition");
 
     int idx = merge_groups_.size() - 1;
     bool new_group = false;
@@ -66,6 +65,10 @@ namespace ECProject
       merge_groups_.push_back(temp);
     } else {
       merge_groups_[idx].push_back(stripe_id);
+    }
+
+    if (IF_DEBUG) {
+      print_placement_result("Generate placement:");
     }
   }
 
@@ -168,5 +171,34 @@ namespace ECProject
         free_nodes_num--;
       }
     }
+  }
+
+  void Coordinator::print_placement_result(std::string msg)
+  {
+    std::cout << std::endl;
+    std::cout << msg << std::endl;
+    for (auto& kv : stripe_table_) {
+      find_out_stripe_partitions(kv.first);
+      std::cout << "Stripe " << kv.first << " block placement:\n";
+      for (auto& vec : kv.second.ec->partition_plan) {
+        unsigned int node_id = kv.second.blocks2nodes[vec[0]];
+        unsigned int cluster_id = node_table_[node_id].map2cluster;
+        std::cout << cluster_id << ": ";
+        for (int ele : vec) {
+          std::cout << "B" << ele << "N" << kv.second.blocks2nodes[ele] << " ";
+        }
+        std::cout << "\n";
+      }
+    }
+    std::cout << "Merge Group: ";
+    for (auto it1 = merge_groups_.begin(); it1 != merge_groups_.end(); it1++) {
+      std::cout << "[ ";
+      for (auto it2 = (*it1).begin(); it2 != (*it1).end(); it2++) {
+        std::cout << (*it2) << " ";
+      }
+      std::cout << "] ";
+    }
+    std::cout << std::endl;
+    std::cout << std::endl;
   }
 }

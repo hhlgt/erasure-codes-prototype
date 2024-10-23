@@ -109,15 +109,15 @@ void test_pc_partition(ProductCode *pc)
 {
   pc->placement_rule = FLAT;
   pc->generate_partition();
-  pc->print_info(pc->partition_plan, "placement");
+  pc->print_info(pc->partition_plan, "partition");
 
   pc->placement_rule = RANDOM;
   pc->generate_partition();
-  pc->print_info(pc->partition_plan, "placement");
+  pc->print_info(pc->partition_plan, "partition");
 
   pc->placement_rule = OPTIMAL;
   pc->generate_partition();
-  pc->print_info(pc->partition_plan, "placement");
+  pc->print_info(pc->partition_plan, "partition");
 }
 
 void test_pc_repair_plan(ProductCode *pc, PlacementRule rule)
@@ -127,8 +127,8 @@ void test_pc_repair_plan(ProductCode *pc, PlacementRule rule)
   
   pc->placement_rule = rule;
   pc->generate_partition();
-  pc->print_info(pc->partition_plan, "placement");
-  pc->row_code.print_info(pc->row_code.partition_plan, "placement");
+  pc->print_info(pc->partition_plan, "partition");
+  pc->row_code.print_info(pc->row_code.partition_plan, "partition");
 
   int failed_num = random_range(1, (pc->m1 + 1) * (pc->m2 + 1) - 1);
   std::vector<int> failure_idxs;

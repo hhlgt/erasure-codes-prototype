@@ -30,8 +30,11 @@ namespace ECProject
     {
       std::string block_id_str = std::to_string(block_id);
       std::vector<char> tmp_val(block_size);
-      read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
-                         tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      bool res = read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
+              tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      if (!res) {
+        pthread_exit(NULL);
+      }
       original_lock_ptr->lock();
       original_blocks_ptr->push_back(tmp_val);
       original_blocks_idx_ptr->push_back(block_idx);
@@ -390,8 +393,11 @@ namespace ECProject
     {
       std::string block_id_str = std::to_string(block_id);
       std::vector<char> tmp_val(block_size);
-      read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
-          tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      bool res = read_from_datanode(block_id_str.c_str(), block_id_str.size(), 
+              tmp_val.data(), block_size, node_ip.c_str(), node_port);
+      if (!res) {
+        pthread_exit(NULL);
+      }
       original_lock_ptr->lock();
       original_blocks_ptr->push_back(tmp_val);
       original_blocks_idx_ptr->push_back(block_idx);

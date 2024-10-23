@@ -596,15 +596,15 @@ void test_lrc_partition(LocallyRepairableCode *lrc)
 {
   lrc->placement_rule = FLAT;
   lrc->generate_partition();
-  lrc->print_info(lrc->partition_plan, "placement");
+  lrc->print_info(lrc->partition_plan, "partition");
 
   lrc->placement_rule = RANDOM;
   lrc->generate_partition();
-  lrc->print_info(lrc->partition_plan, "placement");
+  lrc->print_info(lrc->partition_plan, "partition");
 
   lrc->placement_rule = OPTIMAL;
   lrc->generate_partition();
-  lrc->print_info(lrc->partition_plan, "placement");
+  lrc->print_info(lrc->partition_plan, "partition");
 }
 
 void test_lrc_repair_plan(LocallyRepairableCode *lrc, PlacementRule rule)
@@ -619,7 +619,7 @@ void test_lrc_repair_plan(LocallyRepairableCode *lrc, PlacementRule rule)
   
   lrc->placement_rule = rule;
   lrc->generate_partition();
-  lrc->print_info(lrc->partition_plan, "placement");
+  lrc->print_info(lrc->partition_plan, "partition");
 
   int failed_num = random_range(1, lrc->g + 1);
   std::vector<int> failure_idxs;
