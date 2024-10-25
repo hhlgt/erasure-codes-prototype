@@ -365,7 +365,6 @@ namespace ECProject
                               free_nodes_in_clusters[cluster_id].end(), node_id);
         free_nodes_in_clusters[cluster_id].erase(iter);
       }
-
       int row = -1, col = -1;
       MainRepairPlan main_plan;
       if (ec_schema_.multistripe_placement_rule == VERTICAL) {
@@ -380,7 +379,6 @@ namespace ECProject
           } else {
             main_plan.live_blocks_index.push_back(col);
           }
-          
         }
         if (main_cid == map2clusters[i]) {
           for (auto block_idx : repair_plan.help_blocks[i]) {
@@ -395,8 +393,10 @@ namespace ECProject
               main_plan.inner_cluster_help_blocks_info.push_back(
                   std::make_pair(col, std::make_pair(node_ip, node_port)));
             }
+
             main_plan.inner_cluster_help_block_ids.push_back(
                 stripe.block_ids[block_idx]);
+            
             // for new locations
             unsigned int cluster_id = node_table_[node_id].map2cluster;
             auto iter = std::find(free_nodes_in_clusters[cluster_id].begin(), 

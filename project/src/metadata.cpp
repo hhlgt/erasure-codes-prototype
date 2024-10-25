@@ -183,7 +183,7 @@ namespace ECProject
     } else {
       paras.multistripe_placement_rule = mspr_map.at(temp);
     }
-    paras.object_size_upper = std::stoul(config["object_size_upper"]) * 1024;
+    paras.block_size = std::stoul(config["block_size"]) * 1024;
     paras.cp.x = std::stoi(config["x"]);
     paras.cp.k = std::stoi(config["k"]);
     paras.cp.m = std::stoi(config["m"]);
@@ -218,7 +218,31 @@ namespace ECProject
       std::cout << "(" << paras.cp.k << "," << paras.cp.m << ") ";
     }
     std::cout << paras.cp.x << "(x) "
-              << paras.object_size_upper / paras.cp.k << "(bytes)\n";
+              << paras.block_size << "(bytes)\n";
     std::cout << "*-*-*-*-*-*-*-EC-Info-*-*-*-*-*-*-*" << std::endl;
+  }
+
+  int stripe_wide_after_merge(ParametersInfo paras, int step_size)
+  {
+     ECFAMILY ec_family = check_ec_family(paras.ec_type);
+    if (ec_family == RSCodes) {
+      paras.cp.k *= step_size;
+      return paras.cp.k + paras.cp.m;
+    } else if (ec_family == LRCs) {
+      paras.cp.k *= step_size;
+      paras.cp.l *= step_size;
+      return paras.cp.k + paras.cp.l + paras.cp.g;
+    } else {
+      if (paras.multistripe_placement_rule == VERTICAL) {
+        paras.cp.k2 *= step_size;
+      } else {
+        paras.cp.k1 *= step_size;
+      }
+      if (paras.ec_type == HV_PC) {
+        return (paras.cp.k1 + paras.cp.m1) * (paras.cp.k2 + paras.cp.m2)
+            - paras.cp.m1 * paras.cp.m2;
+      }
+      return (paras.cp.k1 + paras.cp.m1) * (paras.cp.k2 * paras.cp.m2);
+    }
   }
 }

@@ -172,7 +172,6 @@ namespace ECProject
         if (num_of_blocks_in_cluster <= failed_num) {
           t_flag = false;
         }
-        std::cout << "t_flag: " << t_flag << " " << num_of_blocks_in_cluster << " " << failed_num << std::endl;
         t_flag = (if_partial_decoding && t_flag);
         if(!t_flag && IF_DIRECT_FROM_NODE) {  // transfer blocks directly
           num_of_original_blocks += num_of_blocks_in_cluster;

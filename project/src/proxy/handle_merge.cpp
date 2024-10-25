@@ -135,11 +135,11 @@ namespace ECProject
       for (int i = 0; i < num_of_original_blocks; i++) {
         readers[i].join();
       }
-
-      if (IF_DEBUG) {
-        std::cout << "[Main Proxy " << self_cluster_id_
-                  << "] Finish getting blocks inside main cluster." << std::endl;
-      }
+    }
+    if (IF_DEBUG) {
+      std::cout << "[Main Proxy " << self_cluster_id_
+                << "] Finish getting " << num_of_original_blocks
+                << " blocks inside main cluster." << std::endl;
     }
 
     if (recal_plan.ec_type == Hierachical_PC) {
@@ -246,7 +246,8 @@ namespace ECProject
 
       if (IF_DEBUG) {
         std::cout << "[Main Proxy " << self_cluster_id_
-                  << "] Finish getting blocks from other clusters." << std::endl;
+                  << "] Finish getting blocks from other "
+                  << num_of_help_clusters << " clusters." << std::endl;
       }
       
       my_assert(num_of_original_blocks == (int)original_blocks_ptr->size());

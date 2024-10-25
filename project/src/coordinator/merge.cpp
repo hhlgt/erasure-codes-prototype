@@ -31,7 +31,7 @@ namespace ECProject
     double meta_time = 0;
     double cross_cluster_time = 0;
 
-    auto temp_ec = new_ec_for_merge(step_size);
+    ErasureCode *temp_ec = new_ec_for_merge(step_size);
 
     // for each merge group, every x stripes a merge group
     for (auto& merge_group : merge_groups_) {
@@ -41,19 +41,20 @@ namespace ECProject
       for (int mi = 0; mi < group_len; mi += step_size) {
         gettimeofday(&start_time, NULL);
         gettimeofday(&m_start_time, NULL);
-        std::vector<unsigned int> sub_merge_group(
-            merge_group.begin() + mi, merge_group.begin() + mi + step_size);
         std::vector<unsigned int> parity_node_ids;
         std::unordered_set<int> old_stripe_id_set;
-        std::map<unsigned int, LocationInfo> block_location;
+        std::unordered_map<unsigned int, LocationInfo> block_location;
         DeletePlan old_parities;
         std::unordered_set<int> old_parities_cluster_set;
         MainRecalPlan main_plan;
         // merge and generate new stripe information
-        size_t block_size = stripe_table_[sub_merge_group[0]].block_size;
-        Stripe& larger_stripe = new_stripe_for_merge(block_size, temp_ec);
+        size_t block_size = ec_schema_.block_size;
+        Stripe larger_stripe;
+        larger_stripe.stripe_id = cur_stripe_id_++;
+        larger_stripe.block_size = block_size;
         int seri_num = 0;
-        for (auto t_stripe_id : sub_merge_group) {
+        for (int ni = mi; ni < mi + step_size; ni++) {
+          unsigned int t_stripe_id = merge_group[ni];
           old_stripe_id_set.insert(t_stripe_id);
           Stripe &t_stripe = stripe_table_[t_stripe_id];
           int k = t_stripe.ec->k;
@@ -97,7 +98,7 @@ namespace ECProject
         }
         unsigned int parity_cluster_id = 0;
         // generate new parity blocks
-        for (int i = 0; i < larger_stripe.ec->m; i++) {
+        for (int i = 0; i < temp_ec->m; i++) {
           unsigned int t_node_id = parity_node_ids[i];
           auto& t_node = node_table_[t_node_id];
           larger_stripe.blocks2nodes.push_back(t_node_id);
@@ -106,9 +107,14 @@ namespace ECProject
           cluster_table_[parity_cluster_id].holding_stripe_ids.insert(
               larger_stripe.stripe_id);
           main_plan.new_locations.push_back(
-            std::make_pair(larger_stripe.ec->k + i,
+            std::make_pair(temp_ec->k + i,
             std::make_pair(t_node.node_ip, t_node.node_port)));
           main_plan.new_parity_block_ids.push_back(cur_block_id_ - 1);
+        }
+
+        if (IF_DEBUG) {
+          std::cout << "Finish generate new stripe information for stripe"
+                    << larger_stripe.stripe_id << std::endl;
         }
 
         // find out necessary relocation
@@ -142,7 +148,7 @@ namespace ECProject
         std::vector<std::pair<int, int>> 
             sorted_clusters(cluster_block_cnt.begin(), cluster_block_cnt.end());
         std::sort(sorted_clusters.begin(), sorted_clusters.end(), cmp_descending);
-        int m = larger_stripe.ec->m;
+        int m = temp_ec->m;
         int cluster_num = (int)sorted_clusters.size();
         size_t free_cluster_num = free_clusters.size();
 
@@ -248,6 +254,7 @@ namespace ECProject
             blocks_to_move.push_back(larger_stripe.block_ids[block_idx]);
             src_nodes.push_back(node_id);
             des_nodes.push_back((unsigned int)rand_idx);
+            larger_stripe.blocks2nodes[block_idx] = (unsigned int)rand_idx;
             node_map[rand_idx]++;
             node_map[idx]--;
           }
@@ -255,7 +262,7 @@ namespace ECProject
         }
 
         RelocatePlan reloc_plan;
-        reloc_plan.block_size = larger_stripe.block_size;
+        reloc_plan.block_size = block_size;
         int move_num = (int)blocks_to_move.size();
         if (move_num > 0) {
           for (int i = 0; i < move_num; i++) {
@@ -280,13 +287,17 @@ namespace ECProject
           }
         }
 
+        if (IF_DEBUG) {
+          std::cout << "Find out block to relocate!" << std::endl;
+        }
+
         // parity block recalculation
         // generate main plan
         main_plan.ec_type = ec_schema_.ec_type;
-        larger_stripe.ec->get_coding_parameters(main_plan.cp);
+        temp_ec->get_coding_parameters(main_plan.cp);
         main_plan.cluster_id = parity_cluster_id;
         main_plan.cp.x = step_size;
-        main_plan.block_size = larger_stripe.block_size;
+        main_plan.block_size = block_size;
         main_plan.partial_decoding = ec_schema_.partial_decoding;
         for (auto& kv : block_location) {
           if (kv.first == parity_cluster_id) {
@@ -321,15 +332,15 @@ namespace ECProject
           }
         };
 
-        auto send_help_plan = [this, larger_stripe, block_location, main_plan,
+        auto send_help_plan = [this, block_size, block_location, main_plan,
                               parity_cluster_id](unsigned int cluster_id) mutable
         {
           HelpRecalPlan help_plan;
           help_plan.ec_type = ec_schema_.ec_type;
-          larger_stripe.ec->get_coding_parameters(help_plan.cp);
-          help_plan.block_size = larger_stripe.block_size;
+          help_plan.cp = main_plan.cp;
+          help_plan.block_size = block_size;
           help_plan.partial_decoding = ec_schema_.partial_decoding;
-          help_plan.main_proxy_port = cluster_table_[parity_cluster_id].proxy_port;
+          help_plan.main_proxy_port = cluster_table_[parity_cluster_id].proxy_port + SOCKET_PORT_OFFSET;
           help_plan.main_proxy_ip = cluster_table_[parity_cluster_id].proxy_ip;
           auto& location = block_location[cluster_id];
           help_plan.inner_cluster_help_blocks_info = location.blocks_info;
@@ -393,11 +404,18 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
+          for (auto& object : stripe_table_[*it].objects) {
+            auto& vec = commited_object_table_[object].stripes;
+            vec.erase(std::remove(vec.begin(), vec.end(), *it), vec.end());
+            vec.push_back(larger_stripe.stripe_id);
+          }
           stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
         }
+        stripe_table_[larger_stripe.stripe_id] = larger_stripe;
+        stripe_table_[larger_stripe.stripe_id].ec = clone_ec(ec_schema_.ec_type, temp_ec);
         s_merge_group.push_back(larger_stripe.stripe_id);
         stripe_cnt += step_size;
         gettimeofday(&m_end_time, NULL);
@@ -417,6 +435,7 @@ namespace ECProject
     merge_groups_ = new_merge_groups;
     ec_schema_.set_ec(temp_ec);
     ec_schema_.x /= step_size;
+    merged_flag_ = true;
     // response
     response.computing_time = computing_time;
     response.cross_cluster_time = cross_cluster_time;
@@ -444,7 +463,7 @@ namespace ECProject
     double meta_time = 0;
     double cross_cluster_time = 0;
 
-    auto temp_ec = new_ec_for_merge(step_size);
+    ErasureCode *temp_ec = new_ec_for_merge(step_size);
     CodingParameters new_cp;
     temp_ec->get_coding_parameters(new_cp);
     CodingParameters old_cp;
@@ -458,19 +477,24 @@ namespace ECProject
       for (int mi = 0; mi < group_len; mi += step_size) {
         gettimeofday(&start_time, NULL);
         gettimeofday(&m_start_time, NULL);
-        std::vector<unsigned int> sub_merge_group(
-            merge_group.begin() + mi, merge_group.begin() + mi + step_size);
         std::vector<unsigned int> parity_node_ids;
         std::unordered_set<int> old_stripe_id_set;
-        std::map<unsigned int, LocationInfo> block_location;
+        std::unordered_map<unsigned int, LocationInfo> block_location;
         DeletePlan old_parities;
         std::unordered_set<int> old_parities_cluster_set;
         MainRecalPlan main_plan;
         // merge and generate new stripe information
-        size_t block_size = stripe_table_[sub_merge_group[0]].block_size;
-        Stripe& larger_stripe = new_stripe_for_merge(block_size, temp_ec);
+        size_t block_size = ec_schema_.block_size;
+        Stripe larger_stripe;
+        larger_stripe.stripe_id = cur_stripe_id_++;
+        larger_stripe.block_size = block_size;
+        for (int i = 0; i < new_cp.k + new_cp.m; i++) {
+          larger_stripe.blocks2nodes.push_back(0);
+          larger_stripe.block_ids.push_back(0);
+        }
         int seri_num = 0;
-        for (auto t_stripe_id : sub_merge_group) {
+        for (int ni = mi; ni < mi + step_size; ni++) {
+          unsigned int t_stripe_id = merge_group[ni];
           old_stripe_id_set.insert(t_stripe_id);
           Stripe &t_stripe = stripe_table_[t_stripe_id];
           int k = old_cp.k;
@@ -484,26 +508,28 @@ namespace ECProject
             unsigned int t_node_id = t_stripe.blocks2nodes[i];
             unsigned int t_cluster_id = node_table_[t_node_id].map2cluster;
             if (i < k || i >= k + g) {  // data blocks or local parity blocks
-              larger_stripe.blocks2nodes.push_back(t_node_id);
-              larger_stripe.block_ids.push_back(t_stripe.block_ids[i]);
-              cluster_table_[t_cluster_id].holding_stripe_ids.insert(
-                  larger_stripe.stripe_id);
-              if (block_location.find(t_cluster_id) == block_location.end()) {
-                LocationInfo new_location;
-                new_location.cluster_id = t_cluster_id;
-                new_location.proxy_port = cluster_table_[t_cluster_id].proxy_port;
-                new_location.proxy_ip = cluster_table_[t_cluster_id].proxy_ip;
-                block_location[t_cluster_id] = new_location;
-              }
-              LocationInfo& t_location = block_location[t_cluster_id];
-              Node& t_node = node_table_[t_node_id];
               int new_idx = seri_num * k + i;
               if (i >= k + g) {
                 new_idx = x * k + g + seri_num * l + (i - k - g);
               }
-              t_location.blocks_info.push_back(
-                  std::make_pair(new_idx, std::make_pair(t_node.node_ip, t_node.node_port)));
-              t_location.block_ids.push_back(t_stripe.block_ids[i]);
+              larger_stripe.blocks2nodes[new_idx] = t_node_id;
+              larger_stripe.block_ids[new_idx] = t_stripe.block_ids[i];
+              cluster_table_[t_cluster_id].holding_stripe_ids.insert(
+                  larger_stripe.stripe_id);
+              if (i < k) {
+                if (block_location.find(t_cluster_id) == block_location.end()) {
+                  LocationInfo new_location;
+                  new_location.cluster_id = t_cluster_id;
+                  new_location.proxy_port = cluster_table_[t_cluster_id].proxy_port;
+                  new_location.proxy_ip = cluster_table_[t_cluster_id].proxy_ip;
+                  block_location[t_cluster_id] = new_location;
+                }
+                LocationInfo& t_location = block_location[t_cluster_id];
+                Node& t_node = node_table_[t_node_id];
+                t_location.blocks_info.push_back(
+                    std::make_pair(new_idx, std::make_pair(t_node.node_ip, t_node.node_port)));
+                t_location.block_ids.push_back(t_stripe.block_ids[i]);
+              }
             } else {  // global parity blocks
               Node& t_node = node_table_[t_node_id];
               // for new locations
@@ -523,15 +549,21 @@ namespace ECProject
         for (int i = 0; i < new_cp.g; i++) {
           unsigned int t_node_id = parity_node_ids[i];
           auto& t_node = node_table_[t_node_id];
-          larger_stripe.blocks2nodes.push_back(t_node_id);
-          larger_stripe.block_ids.push_back(cur_block_id_++);
+          int new_idx = new_cp.k + i;
+          larger_stripe.blocks2nodes[new_idx] = t_node_id;
+          larger_stripe.block_ids[new_idx] = cur_block_id_++;
           global_cluster_id = t_node.map2cluster;
           cluster_table_[global_cluster_id].holding_stripe_ids.insert(
               larger_stripe.stripe_id);
           main_plan.new_locations.push_back(
-            std::make_pair(new_cp.k + i,
+            std::make_pair(new_idx,
             std::make_pair(t_node.node_ip, t_node.node_port)));
           main_plan.new_parity_block_ids.push_back(cur_block_id_ - 1);
+        }
+
+        if (IF_DEBUG) {
+          std::cout << "Finish generate new stripe information for stripe"
+                    << larger_stripe.stripe_id << std::endl;
         }
 
         // find out necessary relocation
@@ -572,7 +604,7 @@ namespace ECProject
         for (int ii = 0; ii < cluster_num; ii++) {
           std::unordered_map<int, std::vector<int>> group_blocks;
           unsigned int cluster_id = sorted_clusters[ii].first;
-          bool flag = if_subject_to_fault_tolerance_lrc(larger_stripe.stripe_id,
+          bool flag = if_subject_to_fault_tolerance_lrc(temp_ec,
               cluster_blocks[cluster_id], group_blocks);
           if (!flag) {
             int groups_num = (int)group_blocks.size();
@@ -645,14 +677,19 @@ namespace ECProject
             blocks_to_move.push_back(larger_stripe.block_ids[block_idx]);
             src_nodes.push_back(node_id);
             des_nodes.push_back((unsigned int)rand_idx);
+            larger_stripe.blocks2nodes[block_idx] = (unsigned int)rand_idx;
             node_map[rand_idx]++;
             node_map[idx]--;
           }
           block_idx++;
         }
 
+        if (IF_DEBUG) {
+          std::cout << "Find out block to relocate!" << std::endl;
+        }
+
         RelocatePlan reloc_plan;
-        reloc_plan.block_size = larger_stripe.block_size;
+        reloc_plan.block_size = block_size;
         int move_num = (int)blocks_to_move.size();
         if (move_num > 0) {
           for (int i = 0; i < move_num; i++) {
@@ -680,10 +717,10 @@ namespace ECProject
         // parity block recalculation
         // generate main plan
         main_plan.ec_type = ec_schema_.ec_type;
-        larger_stripe.ec->get_coding_parameters(main_plan.cp);
+        temp_ec->get_coding_parameters(main_plan.cp);
         main_plan.cluster_id = global_cluster_id;
         main_plan.cp.x = step_size;
-        main_plan.block_size = larger_stripe.block_size;
+        main_plan.block_size = block_size;
         main_plan.partial_decoding = ec_schema_.partial_decoding;
         main_plan.cp.local_or_column = false;
         for (auto& kv : block_location) {
@@ -719,16 +756,16 @@ namespace ECProject
           }
         };
 
-        auto send_help_plan = [this, larger_stripe, block_location, main_plan,
+        auto send_help_plan = [this, block_size, block_location, main_plan,
                               global_cluster_id](unsigned int cluster_id) mutable
         {
           HelpRecalPlan help_plan;
           help_plan.ec_type = ec_schema_.ec_type;
-          larger_stripe.ec->get_coding_parameters(help_plan.cp);
-          help_plan.block_size = larger_stripe.block_size;
+          help_plan.cp = main_plan.cp;
+          help_plan.block_size = block_size;
           help_plan.partial_decoding = ec_schema_.partial_decoding;
           help_plan.cp.local_or_column = main_plan.cp.local_or_column;
-          help_plan.main_proxy_port = cluster_table_[global_cluster_id].proxy_port;
+          help_plan.main_proxy_port = cluster_table_[global_cluster_id].proxy_port + SOCKET_PORT_OFFSET;
           help_plan.main_proxy_ip = cluster_table_[global_cluster_id].proxy_ip;
           auto& location = block_location[cluster_id];
           help_plan.inner_cluster_help_blocks_info = location.blocks_info;
@@ -793,11 +830,18 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
+          for (auto& object : stripe_table_[*it].objects) {
+            auto& vec = commited_object_table_[object].stripes;
+            vec.erase(std::remove(vec.begin(), vec.end(), *it), vec.end());
+            vec.push_back(larger_stripe.stripe_id);
+          }
           stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
         }
+        stripe_table_[larger_stripe.stripe_id] = larger_stripe;
+        stripe_table_[larger_stripe.stripe_id].ec = clone_ec(ec_schema_.ec_type, temp_ec);
         s_merge_group.push_back(larger_stripe.stripe_id);
         stripe_cnt += step_size;
         gettimeofday(&m_end_time, NULL);
@@ -817,6 +861,7 @@ namespace ECProject
     merge_groups_ = new_merge_groups;
     ec_schema_.set_ec(temp_ec);
     ec_schema_.x /= step_size;
+    merged_flag_ = true;
     // response
     response.computing_time = computing_time;
     response.cross_cluster_time = cross_cluster_time;
@@ -848,7 +893,7 @@ namespace ECProject
     double meta_time = 0;
     double cross_cluster_time = 0;
 
-    auto temp_ec = new_ec_for_merge(step_size);
+    ErasureCode *temp_ec = new_ec_for_merge(step_size);
     CodingParameters new_cp;
     temp_ec->get_coding_parameters(new_cp);
     CodingParameters old_cp;
@@ -862,8 +907,6 @@ namespace ECProject
       for (int mi = 0; mi < group_len; mi += step_size) {
         gettimeofday(&start_time, NULL);
         gettimeofday(&m_start_time, NULL);
-        std::vector<unsigned int> sub_merge_group(
-            merge_group.begin() + mi, merge_group.begin() + mi + step_size);
         std::unordered_set<int> old_stripe_id_set;
         std::unordered_map<int, MainRecalPlan> main_plans;
         std::unordered_map<int, std::vector<unsigned int>> parity_nodes;
@@ -882,17 +925,21 @@ namespace ECProject
             parity_nodes[i] = vec;
           }
         }
+        
         DeletePlan old_parities;
         std::unordered_set<int> old_parities_cluster_set;
         // merge and generate new stripe information
-        size_t block_size = stripe_table_[sub_merge_group[0]].block_size;
-        Stripe& larger_stripe = new_stripe_for_merge(block_size, temp_ec);
+        size_t block_size = ec_schema_.block_size;
+        Stripe larger_stripe;
+        larger_stripe.stripe_id = cur_stripe_id_++;
+        larger_stripe.block_size = block_size;
         for (int i = 0; i < new_cp.k + new_cp.m; i++) {
           larger_stripe.blocks2nodes.push_back(0);
           larger_stripe.block_ids.push_back(0);
         }
         int seri_num = 0;
-        for (auto t_stripe_id : sub_merge_group) {
+        for (int ni = mi; ni < mi + step_size; ni++) {
+          unsigned int t_stripe_id = merge_group[ni];
           old_stripe_id_set.insert(t_stripe_id);
           Stripe &t_stripe = stripe_table_[t_stripe_id];
           int k1 = old_cp.k1;
@@ -1037,20 +1084,22 @@ namespace ECProject
                 }
               }
             } else {  // parity blocks
-              Node& t_node = node_table_[t_node_id];
-              // for new locations
-              if (isvertical) {
-                auto& nodes = parity_nodes[col];
-                nodes[row - k2] = t_node_id;
-              } else {
-                auto& nodes = parity_nodes[row];
-                nodes[col - k1] = t_node_id;
+              if (ec_schema_.ec_type != HV_PC) {
+                Node& t_node = node_table_[t_node_id];
+                // for new locations
+                if (isvertical) {
+                  auto& nodes = parity_nodes[col];
+                  nodes[row - k2] = t_node_id;
+                } else {
+                  auto& nodes = parity_nodes[row];
+                  nodes[col - k1] = t_node_id;
+                }
+                // for delete
+                old_parities.blocks_info.push_back(
+                    std::make_pair(t_node.node_ip, t_node.node_port));
+                old_parities.block_ids.push_back(t_stripe.block_ids[i]);
+                old_parities_cluster_set.insert(t_cluster_id);
               }
-              // for delete
-              old_parities.blocks_info.push_back(
-                  std::make_pair(t_node.node_ip, t_node.node_port));
-              old_parities.block_ids.push_back(t_stripe.block_ids[i]);
-              old_parities_cluster_set.insert(t_cluster_id);
             }
           }
           seri_num++;
@@ -1077,10 +1126,10 @@ namespace ECProject
             }
           }
         } else {
-          int base = new_cp.k2 * new_cp.k1;
           for (auto& kv : parity_nodes) {
             int row = kv.first;
-            if (row > new_cp.k2) {
+            int base = new_cp.k2 * new_cp.k1;
+            if (row >= new_cp.k2) {
               base = new_cp.k2 * (new_cp.k1 + new_cp.m1) + new_cp.m2 * new_cp.k1;
             }
             auto nodes = kv.second;
@@ -1088,7 +1137,7 @@ namespace ECProject
               unsigned int t_node_id = nodes[ii];
               auto& t_node = node_table_[t_node_id];
               int newbid = base + row * new_cp.m1 + ii;
-              if (row > new_cp.k2) {
+              if (row >= new_cp.k2) {
                 newbid = base + (row - new_cp.k2) * new_cp.m1 + ii;
               }
               larger_stripe.blocks2nodes[newbid] = t_node_id;
@@ -1106,6 +1155,11 @@ namespace ECProject
           unsigned int cluster_id = kv.second;
           cluster_table_[cluster_id].holding_stripe_ids.insert(
               larger_stripe.stripe_id);
+        }
+
+        if (IF_DEBUG) {
+          std::cout << "Finish generate new stripe information for stripe"
+                    << larger_stripe.stripe_id << std::endl;
         }
 
         // find out block to move
@@ -1146,7 +1200,7 @@ namespace ECProject
         for (int ii = 0; ii < cluster_num; ii++) {
           std::unordered_map<int, std::vector<int>> col_blocks;
           unsigned int cluster_id = sorted_clusters[ii].first;
-          bool flag = if_subject_to_fault_tolerance_pc(larger_stripe.stripe_id,
+          bool flag = if_subject_to_fault_tolerance_pc(temp_ec,
               cluster_blocks[cluster_id], col_blocks);
           if (!flag) {
             int col_num = (int)col_blocks.size();
@@ -1214,14 +1268,19 @@ namespace ECProject
             blocks_to_move.push_back(larger_stripe.block_ids[block_idx]);
             src_nodes.push_back(node_id);
             des_nodes.push_back((unsigned int)rand_idx);
+            larger_stripe.blocks2nodes[block_idx] = (unsigned int)rand_idx;
             node_map[rand_idx]++;
             node_map[idx]--;
           }
           block_idx++;
         }
 
+        if (IF_DEBUG) {
+          std::cout << "Find out block to relocate!" << std::endl;
+        }
+
         RelocatePlan reloc_plan;
-        reloc_plan.block_size = larger_stripe.block_size;
+        reloc_plan.block_size = block_size;
         int move_num = (int)blocks_to_move.size();
         if (move_num > 0) {
           for (int i = 0; i < move_num; i++) {
@@ -1251,8 +1310,20 @@ namespace ECProject
         for (auto& kv : main_plans) {
           int m_ = 0;
           int idx = kv.first;
+          if (ec_schema_.ec_type == HV_PC) {
+            if (isvertical) {
+              if (idx >= new_cp.k1) {
+                continue;
+              }
+            } else {
+              if (idx >= new_cp.k2) {
+                continue;
+              }
+            }
+          }
           auto& main_plan = kv.second;
           unsigned int parity_cluster_id = main_cluster_ids[idx];
+          std::cout << idx << " " << parity_cluster_id << std::endl;
           main_plan.ec_type = RS;
           if (isvertical) {
             main_plan.cp.k = new_cp.k2;
@@ -1265,12 +1336,11 @@ namespace ECProject
           }
           main_plan.cluster_id = parity_cluster_id;
           main_plan.cp.x = step_size;
-          main_plan.block_size = larger_stripe.block_size;
+          main_plan.block_size = block_size;
           main_plan.partial_decoding = ec_schema_.partial_decoding;
           main_plan.cp.local_or_column = false;
-          for (auto it = main_plan.help_clusters_info.begin();
-               it != main_plan.help_clusters_info.end(); it++) {
-            auto& location = *it;
+          int ci = 0;
+          for (auto& location : main_plan.help_clusters_info) {
             if (location.cluster_id == parity_cluster_id) {
               main_plan.inner_cluster_help_blocks_info.insert(
                   main_plan.inner_cluster_help_blocks_info.end(),
@@ -1278,8 +1348,10 @@ namespace ECProject
               main_plan.inner_cluster_help_block_ids.insert(
                   main_plan.inner_cluster_help_block_ids.end(),
                   location.block_ids.begin(),  location.block_ids.end());
-              main_plan.help_clusters_info.erase(it);
+              main_plan.help_clusters_info.erase(main_plan.help_clusters_info.begin() + ci);
+              break;
             }
+            ci++;
           }
           
           // simulate recalculation
@@ -1306,16 +1378,16 @@ namespace ECProject
             }
           };
 
-          auto send_help_plan = [this, larger_stripe, main_plan,
+          auto send_help_plan = [this, block_size, main_plan,
                                 parity_cluster_id](int help_idx)
           {
             HelpRecalPlan help_plan;
             help_plan.ec_type = ec_schema_.ec_type;
             help_plan.cp = main_plan.cp;
-            help_plan.block_size = larger_stripe.block_size;
+            help_plan.block_size = block_size;
             help_plan.partial_decoding = ec_schema_.partial_decoding;
             help_plan.cp.local_or_column = false;
-            help_plan.main_proxy_port = cluster_table_[parity_cluster_id].proxy_port;
+            help_plan.main_proxy_port = cluster_table_[parity_cluster_id].proxy_port + SOCKET_PORT_OFFSET;
             help_plan.main_proxy_ip = cluster_table_[parity_cluster_id].proxy_ip;
             auto& location = main_plan.help_clusters_info[help_idx];
             unsigned int cluster_id = location.cluster_id;
@@ -1386,11 +1458,18 @@ namespace ECProject
         // update metadata
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
+          for (auto& object : stripe_table_[*it].objects) {
+            auto& vec = commited_object_table_[object].stripes;
+            vec.erase(std::remove(vec.begin(), vec.end(), *it), vec.end());
+            vec.push_back(larger_stripe.stripe_id);
+          }
           stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
         }
+        stripe_table_[larger_stripe.stripe_id] = larger_stripe;
+        stripe_table_[larger_stripe.stripe_id].ec = clone_ec(ec_schema_.ec_type, temp_ec);
         s_merge_group.push_back(larger_stripe.stripe_id);
         stripe_cnt += step_size;
         gettimeofday(&m_end_time, NULL);
@@ -1410,6 +1489,7 @@ namespace ECProject
     merge_groups_ = new_merge_groups;
     ec_schema_.set_ec(temp_ec);
     ec_schema_.x /= step_size;
+    merged_flag_ = true;
     // response
     response.computing_time = computing_time;
     response.cross_cluster_time = cross_cluster_time;
@@ -1442,7 +1522,7 @@ namespace ECProject
     double cross_cluster_time = 0;
 
     int step_size = x;
-    auto temp_ec = new_ec_for_merge(step_size);
+    ErasureCode *temp_ec = new_ec_for_merge(step_size);
     CodingParameters new_cp;
     temp_ec->get_coding_parameters(new_cp);
     CodingParameters old_cp;
@@ -1456,8 +1536,6 @@ namespace ECProject
       for (int mi = 0; mi < group_len; mi += step_size) {
         gettimeofday(&start_time, NULL);
         gettimeofday(&m_start_time, NULL);
-        std::vector<unsigned int> sub_merge_group(
-            merge_group.begin() + mi, merge_group.begin() + mi + step_size);
         std::unordered_set<int> old_stripe_id_set;
         std::unordered_map<int, MainRecalPlan> main_plans;
         std::unordered_map<int, std::vector<unsigned int>> parity_nodes;
@@ -1479,25 +1557,25 @@ namespace ECProject
         DeletePlan old_parities;
         std::unordered_set<int> old_parities_cluster_set;
         // merge and generate new stripe information
-        size_t block_size = stripe_table_[sub_merge_group[0]].block_size;
-        Stripe& larger_stripe = new_stripe_for_merge(block_size, temp_ec);
+        size_t block_size = ec_schema_.block_size;
+        Stripe larger_stripe;
+        larger_stripe.stripe_id = cur_stripe_id_++;
+        larger_stripe.block_size = block_size;
         for (int i = 0; i < new_cp.k + new_cp.m; i++) {
           larger_stripe.blocks2nodes.push_back(0);
           larger_stripe.block_ids.push_back(0);
         }
         int seri_num = 0;
-        for (auto t_stripe_id : sub_merge_group) {
+        for (int ni = mi; ni < mi + step_size; ni++) {
+          unsigned int t_stripe_id = merge_group[ni];
           old_stripe_id_set.insert(t_stripe_id);
           Stripe &t_stripe = stripe_table_[t_stripe_id];
           int k1 = old_cp.k1;
           int m1 = old_cp.m1;
           int k2 = old_cp.k2;
           int m2 = old_cp.m2;
-          HPC t_hpc;
-          old_cp.x = x;
-          old_cp.seri_num = seri_num;
-          t_hpc.init_coding_parameters(old_cp);
-          t_hpc.isvertical = isvertical;
+          ProductCode t_pc;
+          t_pc.init_coding_parameters(old_cp);
           int row = 0;
           int col = 0;
 
@@ -1507,16 +1585,19 @@ namespace ECProject
           for (int i = 0; i < (k1 + m1) * (k2 + m2); i++) {
             unsigned int t_node_id = t_stripe.blocks2nodes[i];
             unsigned int t_cluster_id = node_table_[t_node_id].map2cluster;
-            t_hpc.bid2rowcol(i, row, col);
+            t_pc.bid2rowcol(i, row, col);
             if (i < k1 * k2) {  // data blocks
-              int newbid = t_hpc.oldbid2newbid_for_merge(i, 0, 0, false);
+              int newbid = t_pc.oldbid2newbid_for_merge(
+                  i, x, seri_num, isvertical);
               larger_stripe.blocks2nodes[newbid] = t_node_id;
               larger_stripe.block_ids[newbid] = t_stripe.block_ids[i];
               cluster_table_[t_cluster_id].holding_stripe_ids.insert(
                   larger_stripe.stripe_id);
             } else if (i >= k1 * k2 && i < (k1 + m1) * k2) {
               if (isvertical) {
-                int newbid = t_hpc.oldbid2newbid_for_merge(i, 0, 0, false);
+                int newbid = t_pc.oldbid2newbid_for_merge(
+                    i, x, seri_num, isvertical);
+                std::cout << newbid << " " << t_node_id << " " << t_stripe.block_ids[i] << std::endl;
                 larger_stripe.blocks2nodes[newbid] = t_node_id;
                 larger_stripe.block_ids[newbid] = t_stripe.block_ids[i];
                 cluster_table_[t_cluster_id].holding_stripe_ids.insert(
@@ -1552,7 +1633,8 @@ namespace ECProject
                     std::make_pair(new_idx, std::make_pair(t_node.node_ip, t_node.node_port)));
                 main_plans[col].inner_cluster_help_block_ids.push_back(t_stripe.block_ids[i]);
               } else {
-                int newbid = t_hpc.oldbid2newbid_for_merge(i, 0, 0, false);
+                int newbid = t_pc.oldbid2newbid_for_merge(
+                    i, x, seri_num, isvertical);
                 larger_stripe.blocks2nodes[newbid] = t_node_id;
                 larger_stripe.block_ids[newbid] = t_stripe.block_ids[i];
                 cluster_table_[t_cluster_id].holding_stripe_ids.insert(
@@ -1600,10 +1682,10 @@ namespace ECProject
             }
           }
         } else {
-          int base = new_cp.k2 * new_cp.k1;
           for (auto& kv : parity_nodes) {
             int row = kv.first;
-            if (row > new_cp.k2) {
+            int base = new_cp.k2 * new_cp.k1;
+            if (row >= new_cp.k2) {
               base = new_cp.k2 * (new_cp.k1 + new_cp.m1) + new_cp.m2 * new_cp.k1;
             }
             auto nodes = kv.second;
@@ -1611,7 +1693,7 @@ namespace ECProject
               unsigned int t_node_id = nodes[ii];
               auto& t_node = node_table_[t_node_id];
               int newbid = base + row * new_cp.m1 + ii;
-              if (row > new_cp.k2) {
+              if (row >= new_cp.k2) {
                 newbid = base + (row - new_cp.k2) * new_cp.m1 + ii;
               }
               larger_stripe.blocks2nodes[newbid] = t_node_id;
@@ -1655,6 +1737,7 @@ namespace ECProject
             blocks_to_move.push_back(larger_stripe.block_ids[block_idx]);
             src_nodes.push_back(node_id);
             des_nodes.push_back((unsigned int)rand_idx);
+            larger_stripe.blocks2nodes[block_idx] = (unsigned int)rand_idx;
             node_map[rand_idx]++;
             node_map[idx]--;
           }
@@ -1662,7 +1745,7 @@ namespace ECProject
         }
 
         RelocatePlan reloc_plan;
-        reloc_plan.block_size = larger_stripe.block_size;
+        reloc_plan.block_size = block_size;
         int move_num = (int)blocks_to_move.size();
         if (move_num > 0) {
           for (int i = 0; i < move_num; i++) {
@@ -1706,7 +1789,7 @@ namespace ECProject
           }
           main_plan.cluster_id = parity_cluster_id;
           main_plan.cp.x = step_size;
-          main_plan.block_size = larger_stripe.block_size;
+          main_plan.block_size = block_size;
           main_plan.partial_decoding = ec_schema_.partial_decoding;
           main_plan.cp.local_or_column = false;
           
@@ -1775,11 +1858,18 @@ namespace ECProject
         gettimeofday(&m_start_time, NULL);
         for (auto it = old_stripe_id_set.begin();
             it != old_stripe_id_set.end(); it++) {
+          for (auto& object : stripe_table_[*it].objects) {
+            auto& vec = commited_object_table_[object].stripes;
+            vec.erase(std::remove(vec.begin(), vec.end(), *it), vec.end());
+            vec.push_back(larger_stripe.stripe_id);
+          }
           stripe_table_.erase(*it);
           for (auto& kv : cluster_table_) {
             kv.second.holding_stripe_ids.erase(*it);
           }
         }
+        stripe_table_[larger_stripe.stripe_id] = larger_stripe;
+        stripe_table_[larger_stripe.stripe_id].ec = clone_ec(ec_schema_.ec_type, temp_ec);
         s_merge_group.push_back(larger_stripe.stripe_id);
         stripe_cnt += step_size;
         gettimeofday(&m_end_time, NULL);
@@ -1799,6 +1889,7 @@ namespace ECProject
     merge_groups_ = new_merge_groups;
     ec_schema_.set_ec(temp_ec);
     ec_schema_.x = 1;
+    merged_flag_ = true;
     // response
     response.computing_time = computing_time;
     response.cross_cluster_time = cross_cluster_time;

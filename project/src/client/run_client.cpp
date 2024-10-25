@@ -123,6 +123,7 @@ void test_multiple_blocks_repair(Client &client, int block_num)
 
 void test_stripe_merging(Client &client, int step_size)
 {
+  my_assert(step_size > 1);
   auto stripe_ids = client.list_stripes();
   int stripe_num = stripe_ids.size();
   std::cout << "Stripe Merging:" << std::endl;
@@ -158,6 +159,7 @@ int main(int argc, char **argv)
 
   ParametersInfo paras;
   parse_args(paras, config_path);
+  int block_num = paras.cp.k + paras.cp.m;
 
   int stripe_num = std::stoi(argv[1]);
   Client client("0.0.0.0", CLIENT_PORT, "0.0.0.0", COORDINATOR_PORT);
@@ -167,7 +169,7 @@ int main(int argc, char **argv)
 
   struct timeval start_time, end_time;
   // generate key-value pair
-  int value_length = (int)paras.object_size_upper;
+  int value_length = (int)paras.block_size * paras.cp.k;
   std::unordered_map<std::string, std::string> key_value;
   generate_unique_random_strings(5, value_length, stripe_num, key_value);
 
@@ -185,14 +187,23 @@ int main(int argc, char **argv)
   }
   std::cout << "Total set time: " << set_time << ", average set time:"
             << set_time / stripe_num << std::endl;
-  
+
   // single-block repair
-  int block_num = paras.cp.k + paras.cp.m;
   std::cout << "[Pre-merging] ";
   test_single_block_repair(client, block_num);
 
   // multiple-block repair
-  int block_num = paras.cp.k + paras.cp.m;
+  test_multiple_blocks_repair(client, block_num);
+
+  // merge
+  test_stripe_merging(client, paras.cp.x);
+
+  // repair
+  std::cout << "[Post-merging] ";
+  block_num = stripe_wide_after_merge(paras, paras.cp.x);
+  test_single_block_repair(client, block_num);
+
+  // multiple-block repair
   test_multiple_blocks_repair(client, block_num);
 
   // get
@@ -207,14 +218,6 @@ int main(int argc, char **argv)
       (end_time.tv_usec - start_time.tv_usec) * 1.0 / 1000000;
   std::cout << "Total get time: " << get_time << ", average get time:"
             << get_time / stripe_num << std::endl;
-/*
-  // merge
-  test_stripe_merging(client, paras.x);
-
-  // repair
-  std::cout << "[Post-merging] ";
-  test_single_block_repair(client, block_num);
-  */
 
   // delete
   client.delete_all_stripes();

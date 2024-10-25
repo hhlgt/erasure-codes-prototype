@@ -26,7 +26,8 @@ The architecture follows master-worker style, like many state-of-art distributed
   - get/read, including solutions for degraded read
   - delete
   - block repair, node repair
-  - stripe merging (evaluating)
+  - stripe merging
+    - now support `RS Codes`, `Azure-LRC`, `PCs` with `optimal` placement rule
 
 - Implementations for storing data
 
@@ -36,7 +37,7 @@ The architecture follows master-worker style, like many state-of-art distributed
     - via `redis`
     - via `memcached`
 
-  > for different implementation, you should assign the correct value of `IF_MEMORY`, `IF_REDIS`, `IF_MEMCACHED` in the following files: `project/include/metadata.h`, `project/CmakeLists.txt`, `install_third_party.sh`, `tools/generator_sh.py`.
+  > for different implementation, you should assign the correct value of `IN_MEMORY`, `IF_REDIS`, `IF_MEMCACHED` in the following files: `project/include/metadata.h`, `project/CmakeLists.txt`, `install_third_party.sh`, `tools/generator_sh.py`.
 
 ## Quick Start
 
@@ -99,11 +100,11 @@ placement_rule = OPTIMAL
 
 # placement rule of every x stripes
 # for RS Codes and LRCs: RAND, DISPERSED, AGGREGATED
-# for Product Codes: VERTICAL, HIRIZONTAL
+# for Product Codes: VERTICAL, HORIZONTAL
 multistripe_placement_rule = RAND
 
-# KB, equal to k * block_size
-object_size_upper = 6
+# KB, block_size
+block_size = 1
 
 # number of stripes to be merged into a larged-size stripe
 x = 2

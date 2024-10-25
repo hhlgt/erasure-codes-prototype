@@ -63,7 +63,7 @@ namespace ECProject
 		int k;		 /* number of data blocks */
 		int m;		 /* number of parity blocks */
 		int w = 8; /* word size for encoding */
-		PlacementRule placement_rule = FLAT;
+		PlacementRule placement_rule = OPTIMAL;
 		bool local_or_column = false;
 		std::vector<std::vector<int>> partition_plan;
 

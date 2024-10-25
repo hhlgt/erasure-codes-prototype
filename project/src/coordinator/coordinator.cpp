@@ -43,7 +43,7 @@ namespace ECProject
     ec_schema_.placement_rule = paras.placement_rule;
     ec_schema_.multistripe_placement_rule = paras.multistripe_placement_rule;
     ec_schema_.x = paras.cp.x;
-    ec_schema_.object_size_upper = paras.object_size_upper;
+    ec_schema_.block_size = paras.block_size;
     ec_schema_.ec = ec_factory(paras.ec_type, paras.cp);
     reset_metadata();
   }
@@ -82,7 +82,7 @@ namespace ECProject
 
     PlacementInfo placement;
 
-    if (ec_schema_.object_size_upper >= total_value_len) {
+    if (ec_schema_.block_size * ec_schema_.ec->k >= total_value_len) {
       size_t block_size = 
         std::ceil(static_cast<double>(total_value_len) / 
                   static_cast<double>(ec_schema_.ec->k));
@@ -90,7 +90,7 @@ namespace ECProject
       init_placement_info(placement, objects[0].first,
                           total_value_len, block_size, 0);
 
-      Stripe& stripe = new_stripe(block_size);
+      Stripe& stripe = new_stripe(block_size, ec_schema_.ec);
       for (int i = 0; i < num_of_objects; i++) {
         stripe.objects.push_back(objects[i].first);
         new_objects[i].stripes.push_back(stripe.stripe_id);
@@ -119,20 +119,16 @@ namespace ECProject
         placement.block_ids.push_back(block_id);
       }
     } else {
-      size_t block_size = 
-        std::ceil(static_cast<double>(ec_schema_.object_size_upper) / 
-                  static_cast<double>(ec_schema_.ec->k));
-      block_size = 64 * std::ceil(static_cast<double>(block_size) / 64.0);
       init_placement_info(placement, objects[0].first,
-                          total_value_len, block_size, -1);
+                          total_value_len, ec_schema_.block_size, -1);
             
-      int num_of_stripes = total_value_len / (ec_schema_.ec->k * block_size);
+      int num_of_stripes = total_value_len / (ec_schema_.ec->k * ec_schema_.block_size);
       size_t left_value_len = total_value_len;
       int cumulative_len = 0, obj_idx = 0;
       for (int i = 0; i < num_of_stripes; i++) {
-        left_value_len -= ec_schema_.ec->k * block_size;
-        auto &stripe = new_stripe(block_size);
-        while (cumulative_len < ec_schema_.ec->k * block_size) {
+        left_value_len -= ec_schema_.ec->k * ec_schema_.block_size;
+        Stripe& stripe = new_stripe(ec_schema_.block_size, ec_schema_.ec);
+        while (cumulative_len < ec_schema_.ec->k * ec_schema_.block_size) {
           stripe.objects.push_back(objects[obj_idx].first);
           new_objects[obj_idx].stripes.push_back(stripe.stripe_id);
           cumulative_len += objects[obj_idx].second;
@@ -167,8 +163,8 @@ namespace ECProject
                                            static_cast<double>(ec_schema_.ec->k));
         tail_block_size = 64 * std::ceil(static_cast<double>(tail_block_size) / 64.0);
         placement.tail_block_size = tail_block_size;
-        auto &stripe = new_stripe(tail_block_size);
-        if (cumulative_len > ec_schema_.ec->k * block_size) {// for object cross stripe
+        Stripe& stripe = new_stripe(tail_block_size, ec_schema_.ec);
+        if (cumulative_len > ec_schema_.ec->k * tail_block_size) {  // for object cross stripe
           stripe.objects.push_back(objects[obj_idx - 1].first);
           new_objects[obj_idx - 1].stripes.push_back(stripe.stripe_id);
         }
@@ -290,25 +286,22 @@ namespace ECProject
     mutex_.unlock();
 
     PlacementInfo placement;
-    if (ec_schema_.object_size_upper >= object.value_len) {
-      size_t block_size = std::ceil(static_cast<double>(object.value_len) /
-                                  static_cast<double>(ec_schema_.ec->k));
-      block_size = 64 * std::ceil(static_cast<double>(block_size) / 64.0);
-      init_placement_info(placement, key, object.value_len, block_size, 0);
+    int stripe_num = (int)object.stripes.size();
+    my_assert(stripe_num > 0);
+    if (stripe_num == 1) {
+      unsigned int stripe_id = object.stripes[0];
+      Stripe &stripe = stripe_table_[stripe_id];
+      init_placement_info(placement, key, object.value_len, stripe.block_size, 0);
     } else {
-      size_t block_size = std::ceil(static_cast<double>(ec_schema_.object_size_upper) /
-                                  static_cast<double>(ec_schema_.ec->k));
-      block_size = 64 * std::ceil(static_cast<double>(block_size) / 64.0);
-      size_t tail_block_size = -1;
-      if (object.value_len % (ec_schema_.ec->k * block_size) != 0) {
-        size_t tail_stripe_size = object.value_len % (ec_schema_.ec->k * block_size);
-        tail_block_size = 
-            std::ceil(static_cast<double>(tail_stripe_size) /
-                      static_cast<double>(ec_schema_.ec->k));
-        tail_block_size = 64 * std::ceil(static_cast<double>(tail_block_size) / 64.0);
+      unsigned int stripe_id1 = object.stripes[0];
+      unsigned int stripe_id2 = object.stripes[stripe_num - 1];
+      size_t tail_block_size = 0;
+      if (stripe_table_[stripe_id2].block_size
+          != stripe_table_[stripe_id1].block_size) {
+        tail_block_size = stripe_table_[stripe_id2].block_size;
       }
       init_placement_info(placement, key, object.value_len,
-                          block_size, tail_block_size);
+                          stripe_table_[stripe_id1].block_size, tail_block_size);
     }
 
     for (auto stripe_id : object.stripes) {
@@ -322,6 +315,10 @@ namespace ECProject
           int t_object_len = commited_object_table_[stripe.objects[i]].value_len;
           offset += t_object_len / stripe.block_size;     // must be block_size of stripe
         } else {
+          if (merged_flag_) {
+            placement.cp.seri_num = i;
+            placement.cp.x = num_of_object_in_a_stripe;
+          }
           break;
         }
       }
@@ -424,6 +421,7 @@ namespace ECProject
 
   MergeResp Coordinator::request_merge(int step_size)
   {
+    my_assert(step_size == ec_schema_.x && !merged_flag_);
     MergeResp response;
     do_stripe_merge(response, step_size);
     return response;

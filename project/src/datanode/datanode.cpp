@@ -72,7 +72,8 @@ namespace ECProject
                                                value_buf.size(),
                                                (time_t)0, (uint32_t)0);
         if (rc != MEMCACHED_SUCCESS) {
-          std::cout << "[Datanode" << port_ << "][Memcached] failed to set! "
+          std::cout << "[Datanode" << port_ << "][Memcached] failed to set"
+                    << key_buf << "! "
                     << memcached_strerror(memcached_, rc) << std::endl;
           return false;
         }
@@ -80,7 +81,8 @@ namespace ECProject
       #ifdef REDIS
         auto status = redis_->set(key_buf, value_buf);
         if (!status) {
-          std::cout << "[Datanode" << port_ << "][Redis] failed to set!\n";
+          std::cout << "[Datanode" << port_ << "][Redis] failed to set"
+                    << key_buf << "!\n";
           return false;
         }
       #endif
@@ -88,7 +90,8 @@ namespace ECProject
         #ifndef REDIS
           auto ret = kvstore_.insert(std::make_pair(key_buf, value_buf));
           if (!ret.second) {
-            std::cout << "[Datanode" << port_ << "][kvstore] failed to set!\n";
+            std::cout << "[Datanode" << port_ << "][kvstore] failed to set"
+                      << key_buf << "!\n";
             return false;
           }
         #endif
@@ -234,11 +237,21 @@ namespace ECProject
         asio::read(socket_, asio::buffer(size_buf, size_buf.size()), ec);
         int value_size = bytes_to_int(size_buf);
 
+        if (IF_DEBUG) {
+          std::cout << "[Datanode" << port_ << "] Read " << key_size
+                    << " bytes key and " << value_size << " bytes value" << std::endl;
+        }
+
         if (value_size > 0) {
           std::string key_buf(key_size, 0);
           std::string value_buf(value_size, 0);
           asio::read(socket_, asio::buffer(key_buf.data(), key_buf.size()), ec);
           asio::read(socket_, asio::buffer(value_buf.data(), value_buf.size()), ec);
+
+          if (IF_DEBUG) {
+            std::cout << "[Datanode" << port_ << "][Write] recieved "
+                      << key_buf << " with " << value_size << "bytes" << std::endl;
+          }
 
           bool ret = store_data(key_buf, value_buf, value_size);
 

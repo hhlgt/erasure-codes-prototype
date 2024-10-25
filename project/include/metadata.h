@@ -35,11 +35,11 @@ namespace ECProject
   {
     bool partial_decoding;
     ECTYPE ec_type;
-    ErasureCode *ec;
+    ErasureCode *ec = nullptr;
     PlacementRule placement_rule;
     MultiStripePR multistripe_placement_rule;
     int x;
-    size_t object_size_upper;  // bytes
+    size_t block_size;  // bytes
 
     ~ECSchema()
     {
@@ -66,7 +66,7 @@ namespace ECProject
   struct Stripe
   {
     unsigned int stripe_id;
-    ErasureCode *ec;
+    ErasureCode *ec = nullptr;
     size_t block_size;
     // data blocks, local parity blocks, global parity blocks in order
     std::vector<unsigned int> blocks2nodes;
@@ -106,7 +106,7 @@ namespace ECProject
     PlacementRule placement_rule;
     MultiStripePR multistripe_placement_rule;
     CodingParameters cp;
-    size_t object_size_upper;
+    size_t block_size;
   };
   
   struct PlacementInfo
@@ -117,6 +117,7 @@ namespace ECProject
     std::vector<int> offsets; // for cross-object striping
     std::vector<int> seri_nums;
     bool isvertical = false;
+    bool merged_flag = false;
     std::string key;
     size_t value_len;
     size_t block_size;
@@ -268,4 +269,5 @@ namespace ECProject
   ProductCode* pc_factory(ECTYPE ec_type, CodingParameters cp);
   ErasureCode* clone_ec(ECTYPE ec_type, ErasureCode* ec);
   void parse_args(ParametersInfo& paras, std::string config_file);
+  int stripe_wide_after_merge(ParametersInfo paras, int step_size);
 }

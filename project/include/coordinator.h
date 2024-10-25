@@ -43,18 +43,17 @@ namespace ECProject
     void init_cluster_info();
     void init_proxy_info();
     void reset_metadata();
-    Stripe& new_stripe(size_t block_size);
+    Stripe& new_stripe(size_t block_size, ErasureCode *ec);
     ErasureCode* new_ec_for_merge(int step_size);
-    Stripe& new_stripe_for_merge(size_t block_size, ErasureCode *ec);
     void find_out_stripe_partitions(unsigned int stripe_id);
     void init_placement_info(PlacementInfo &placement, std::string key,
                              size_t value_len, size_t block_size,
                              size_t tail_block_size);
     bool if_subject_to_fault_tolerance_lrc(
-            unsigned int stripe_id, std::vector<int> blocks_in_cluster,
+            ErasureCode *ec, std::vector<int> blocks_in_cluster,
             std::unordered_map<int, std::vector<int>> &group_blocks);
     bool if_subject_to_fault_tolerance_pc(
-            unsigned int stripe_id, std::vector<int> blocks_in_cluster,
+            ErasureCode *ec, std::vector<int> blocks_in_cluster,
             std::unordered_map<int, std::vector<int>> &col_blocks);
 
     // placement.cpp
@@ -115,5 +114,6 @@ namespace ECProject
     unsigned int lucky_cid_;
     std::vector<std::vector<unsigned int>> merge_groups_;
     std::vector<unsigned int> free_clusters_;
+    bool merged_flag_ = false;
   };
 }

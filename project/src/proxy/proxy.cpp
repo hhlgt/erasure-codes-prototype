@@ -432,7 +432,7 @@ namespace ECProject
       auto ec = ec_factory(placement.ec_type, placement.cp);
       ec->init_coding_parameters(placement.cp);
       int stripe_num = (int)placement.stripe_ids.size();
-      size_t left_value_len = placement.value_len;
+      int left_value_len = (int)placement.value_len;
       for (auto i = 0; i < placement.stripe_ids.size(); i++) {
         unsigned int stripe_id = placement.stripe_ids[i];
         auto blocks_ptr = std::make_shared<std::unordered_map<int, std::string>>();
@@ -465,17 +465,32 @@ namespace ECProject
         }
         int num_of_blocks_each_stripe = ec->k + ec->m;
         int cross_cluster_num = 0;
+        auto ec_family = check_ec_family(placement.ec_type);
+        bool flag = placement.merged_flag;
+        flag = (flag && ec_family == PCs && !placement.isvertical);
+        int cnt1 = 0, cnt2 = 0;
         std::vector<std::thread> readers;
         for (int j = 0; j < num_of_datanodes_involved; j++) {
+          int idx = i * num_of_blocks_each_stripe + j + offset;
+          if (flag) {
+            idx -= offset;
+            idx += placement.cp.seri_num * placement.cp.k1 / placement.cp.x
+                + cnt2 * placement.cp.k1* (placement.cp.x - 1) / placement.cp.x ;
+            cnt1++;
+            if (cnt1 == placement.cp.k1 / placement.cp.x) {
+              cnt1 = 0;
+              cnt2++;
+            }
+          }
           unsigned int cluster_id =
-              placement.datanode_ip_port[i * num_of_blocks_each_stripe + j + offset].first;
+              placement.datanode_ip_port[idx].first;
           std::pair<std::string, int> ip_and_port_of_datanode =
-              placement.datanode_ip_port[i * num_of_blocks_each_stripe + j + offset].second;
+              placement.datanode_ip_port[idx].second;
           readers.push_back(
-            std::thread([this, i, j, blocks_ptr, block_idxs_ptr, cur_block_size,
-                num_of_blocks_each_stripe, ip_and_port_of_datanode, placement, offset]() {
+            std::thread([this, idx, j, blocks_ptr, block_idxs_ptr, cur_block_size,
+                ip_and_port_of_datanode, placement]() {
               std::string block_id =
-                  std::to_string(placement.block_ids[i * num_of_blocks_each_stripe + j + offset]);
+                  std::to_string(placement.block_ids[idx]);
 
               std::string block(cur_block_size, 0);
               auto res = read_from_datanode(block_id.c_str(), block_id.size(),
@@ -488,7 +503,7 @@ namespace ECProject
               }
               mutex_.lock();
               (*blocks_ptr)[j] = block;
-              (*block_idxs_ptr)[j] = i * num_of_blocks_each_stripe + j + offset;
+              (*block_idxs_ptr)[j] = idx;
               mutex_.unlock();
           }));
           if (cluster_id != self_cluster_id_) { // to do
@@ -747,8 +762,9 @@ namespace ECProject
   {
     auto migrate_a_block = [this, reloc_plan](int i) mutable
     {
-      block_migration(std::to_string(reloc_plan.blocks_to_move[i]).c_str(), 
-                      sizeof(unsigned int),
+      std::string block_id = std::to_string(reloc_plan.blocks_to_move[i]);
+      block_migration(block_id.c_str(), 
+                      block_id.size(),
                       reloc_plan.block_size,
                       reloc_plan.src_nodes[i].second.first.c_str(),
                       reloc_plan.src_nodes[i].second.second,

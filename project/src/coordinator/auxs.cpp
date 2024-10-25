@@ -71,6 +71,7 @@ namespace ECProject
     cur_stripe_id_ = 0;
     cur_block_id_ = 0;
     time_ = 0;
+    merged_flag_ = false;
     commited_object_table_.clear();
     updating_object_table_.clear();
     merge_groups_.clear();
@@ -87,13 +88,14 @@ namespace ECProject
     }
   }
 
-  Stripe& Coordinator::new_stripe(size_t block_size)
+  Stripe& Coordinator::new_stripe(size_t block_size, ErasureCode *ec)
   {
+    my_assert(ec != nullptr);
     Stripe temp;
     temp.stripe_id = cur_stripe_id_++;
     temp.block_size = block_size;
     stripe_table_[temp.stripe_id] = temp;
-    stripe_table_[temp.stripe_id].ec = clone_ec(ec_schema_.ec_type, ec_schema_.ec);
+    stripe_table_[temp.stripe_id].ec = clone_ec(ec_schema_.ec_type, ec);
     return stripe_table_[temp.stripe_id];
   }
 
@@ -117,16 +119,6 @@ namespace ECProject
     return ec_factory(ec_schema_.ec_type, cp);
   }
 
-  Stripe& Coordinator::new_stripe_for_merge(size_t block_size, ErasureCode *ec)
-  {
-    Stripe temp;
-    temp.stripe_id = cur_stripe_id_++;
-    temp.block_size = block_size;
-    stripe_table_[temp.stripe_id] = temp;
-    stripe_table_[temp.stripe_id].ec = clone_ec(ec_schema_.ec_type, ec);
-    return stripe_table_[temp.stripe_id];
-  }
-
   void Coordinator::init_placement_info(PlacementInfo &placement, std::string key,
                                         size_t value_len, size_t block_size,
                                         size_t tail_block_size)
@@ -138,6 +130,7 @@ namespace ECProject
     placement.block_size = block_size;
     placement.tail_block_size = tail_block_size;
     placement.cp.x = ec_schema_.x;
+    placement.merged_flag = merged_flag_;
     if (ec_schema_.multistripe_placement_rule == VERTICAL) {
       placement.isvertical = true;
     }
@@ -166,11 +159,10 @@ namespace ECProject
   }
 
   bool Coordinator::if_subject_to_fault_tolerance_lrc(
-          unsigned int stripe_id, std::vector<int> blocks_in_cluster,
+          ErasureCode *ec, std::vector<int> blocks_in_cluster,
           std::unordered_map<int, std::vector<int>>& group_blocks)
   {
-    Stripe& stripe = stripe_table_[stripe_id];
-    auto lrc = dynamic_cast<LocallyRepairableCode*>(stripe.ec);
+    auto lrc = dynamic_cast<LocallyRepairableCode*>(ec);
     int blocks_num = (int)blocks_in_cluster.size();
     for (int i = 0; i < blocks_num; i++) {
       int gid = lrc->bid2gid(blocks_in_cluster[i]);
@@ -188,11 +180,10 @@ namespace ECProject
   }
 
   bool Coordinator::if_subject_to_fault_tolerance_pc(
-            unsigned int stripe_id, std::vector<int> blocks_in_cluster,
+            ErasureCode *ec, std::vector<int> blocks_in_cluster,
             std::unordered_map<int, std::vector<int>> &col_blocks)
   {
-    Stripe& stripe = stripe_table_[stripe_id];
-    auto pc = dynamic_cast<ProductCode*>(stripe.ec);
+    auto pc = dynamic_cast<ProductCode*>(ec);
     int blocks_num = (int)blocks_in_cluster.size();
     for (int i = 0; i < blocks_num; i++) {
       int row = -1, col = -1;
